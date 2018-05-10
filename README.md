@@ -5,7 +5,7 @@ a maze created with structures of different shapes and colors.
 ## Data
 
 300 videos of maze navigation are stored in target/0, target/1, target/2
-![Sample video](target/0/0.mp4)
+![Sample video](miscelanous/sample_video.gif)
 
 Annotation data is stored at *Maze traversal annotation.xlsx*
 
