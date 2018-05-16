@@ -44,7 +44,6 @@ def create_standard_hparams():
       batch_size=32,
       init_op="uniform",
       init_weight=0.1,
-      max_gradient_norm=5.0,
       learning_rate=1.0,
       warmup_steps=0,
       warmup_scheme="t2t",
@@ -77,7 +76,7 @@ def create_standard_hparams():
       log_device_placement=False,
       random_seed=None,
       # only enable beam search during inference when beam_width > 0.
-      beam_width=0,
+      beam_width=2,
       length_penalty_weight=0.0,
       override_loaded_hparams=True,
       num_keep_ckpts=5,
@@ -191,6 +190,7 @@ class SimpleAttentionModel( object ):
 		dtype = tf.float32
 
 		# res = logits, loss, final_context_state, sample_id
+		# final_context_state are the context 
 		with tf.variable_scope(scope or "dynamic_seq2seq", dtype=dtype):
 			# Encoder
 			encoder_outputs, encoder_state = self._build_encoder(hparams)
@@ -206,6 +206,124 @@ class SimpleAttentionModel( object ):
 					loss = self._compute_loss(logits)
 			else:
 				loss = None
+
+		if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+			self.train_loss = loss
+		elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
+			self.eval_loss = loss
+		elif self.mode == tf.contrib.learn.ModeKeys.INFER:
+			self.final_context_state =  final_context_state
+			self.sample_words = reverse_target_vocab_table.lookup(
+			  tf.to_int64(sample_id))
+
+		self.global_step = tf.Variable(0, trainable=False)
+    	params = tf.trainable_variables()
+
+    	# Gradients and SGD update operation for training the model.
+		# Arrage for the embedding vars to appear at the beginning.
+		if self.mode == tf.contrib.learn.ModeKeys.TRAIN:
+			self.learning_rate = tf.constant(hparams.learning_rate)
+			# warm-up
+			self.learning_rate = self._get_learning_rate_warmup(hparams)
+			# decay
+			self.learning_rate = self._get_learning_rate_decay(hparams)
+
+			# Optimizer
+			if hparams.optimizer == "sgd":
+				opt = tf.train.GradientDescentOptimizer(self.learning_rate)
+				tf.summary.scalar("lr", self.learning_rate)
+			elif hparams.optimizer == "adam":
+				opt = tf.train.AdamOptimizer(self.learning_rate)
+
+			self.update = opt.minimize(self.train_loss)
+
+			# Summary
+			self.train_summary = tf.summary.merge([
+			  	tf.summary.scalar("lr", self.learning_rate),
+			  	tf.summary.scalar("train_loss", self.train_loss),
+			])
+
+		if self.mode == tf.contrib.learn.ModeKeys.INFER:
+      		self.infer_summary = tf.no_op()
+
+      	# Saver
+	    self.saver = tf.train.Saver(
+	        tf.global_variables(), max_to_keep=hparams.num_keep_ckpts)
+
+	    # Print trainable variables
+	    utils.print_out("# Trainable variables")
+	    for param in params:
+			utils.print_out("  %s, %s, %s" % (param.name, str(param.get_shape()),
+                                        param.op.device))
+
+	
+	##############################  Public methods  ###############################
+
+	def train(self, sess):
+	    assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
+	    return sess.run([self.update,
+	                     self.train_loss,
+	                     self.train_summary,
+	                     self.global_step,
+	                     self.batch_size,
+	                     self.grad_norm,
+	                     self.learning_rate])
+
+	def eval(self, sess):
+	    assert self.mode == tf.contrib.learn.ModeKeys.EVAL
+	    return sess.run([self.eval_loss,
+	                     self.batch_size])
+
+	def infer(self, sess):
+	    assert self.mode == tf.contrib.learn.ModeKeys.INFER
+	    return sess.run([
+	        self.infer_summary, self.sample_words
+	    ])
+
+	def decode(self, sess):
+		"""Decode a batch.
+
+		Args:
+		  sess: tensorflow session to use.
+
+		Returns:
+		  A tuple consiting of outputs, infer_summary.
+		    outputs: of size [batch_size, time] if beam_width == 0
+		    		of of size [batch_size, time, beam_width]
+		"""
+		infer_summary, sample_words = self.infer(sess)
+
+		# make sure outputs is of shape [batch_size, time] or [beam_width,
+		# batch_size, time] when using beam search.
+		if self.time_major:
+			sample_words = sample_words.transpose()
+		elif sample_words.ndim == 3:  # beam search output in [batch_size,
+		                              # time, beam_width] shape.
+			sample_words = sample_words.transpose([2, 0, 1])
+		return sample_words, infer_summary
+
+	#######################  Important training private methods  ###########################
+
+	def _compute_loss(self, logits):
+	    """Compute optimization loss."""
+	    target_output = self.iterator.target_output
+	    
+	    if self.time_major:
+	    	target_output = tf.transpose(target_output)
+
+	    max_time = self.get_max_time(target_output)
+	    crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
+	        labels=target_output, logits=logits)
+	    target_weights = tf.sequence_mask(
+	        self.iterator.target_sequence_length, max_time, dtype=logits.dtype)
+	    
+	    if self.time_major:
+	    	target_weights = tf.transpose(target_weights)
+
+	    loss = tf.reduce_sum(
+	        crossent * target_weights) / tf.to_float(self.batch_size)
+
+	    return loss
 
 	def _build_encoder(self, hparams):
 	    """Build an encoder."""
@@ -227,7 +345,7 @@ class SimpleAttentionModel( object ):
 			if hparams.encoder_type == "uni":
 				utils.print_out("  num_layers = %d" % num_layers)
 				cell = self._build_encoder_cell(
-				    hparams, num_layers, 0)
+				    hparams, num_layers)
 
 				encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
 				    cell,
@@ -238,6 +356,56 @@ class SimpleAttentionModel( object ):
 				    swap_memory=True)
 	      
 	    return encoder_outputs, encoder_state
+
+	def _build_encoder_cell(self, hparams, num_layers,
+	                          base_gpu=0):
+	    """Build a multi-layer RNN cell that can be used by encoder."""
+
+	    return model_helper.create_rnn_cell(
+	        unit_type=hparams.unit_type,
+	        num_units=hparams.num_units,
+	        num_layers=num_layers,
+	        num_residual_layers=0,
+	        forget_bias=hparams.forget_bias,
+	        dropout=hparams.dropout,
+	        num_gpus=hparams.num_gpus,
+	        mode=self.mode,
+	        base_gpu=base_gpu,
+	        single_cell_fn=self.single_cell_fn)
+
+	def _build_decoder(self, encoder_outputs, encoder_state, hparams):
+		"""Build and run a RNN decoder with a final projection layer.
+
+	    Args:
+	      encoder_outputs: The outputs of encoder for every time step.
+	      encoder_state: The final state of the encoder.
+	      hparams: The Hyperparameters configurations.
+
+	    Returns:
+	      A tuple of final logits and final decoder state:
+	        logits: size [time, batch_size, vocab_size] when time_major=True.
+	    """
+
+	    ### Start and end of sequence 
+	    tgt_sos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.sos)),
+                         tf.int32)
+	    tgt_eos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.eos)),
+	                         tf.int32)
+	    iterator = self.iterator
+
+	    maximum_iterations = hparams.tgt_max_len_infer
+		utils.print_out("  decoding maximum_iterations %d" % maximum_iterations)
+
+		## Decoder.
+    	with tf.variable_scope("decoder") as decoder_scope:
+    		cell, decoder_initial_state = self._build_decoder_cell(
+	          hparams, encoder_outputs, encoder_state,
+	          iterator.source_sequence_length)
+
+    		## Train or eval
+      		if self.mode != tf.contrib.learn.ModeKeys.INFER:
+      			
+
 
 	def _build_decoder_cell(self, hparams, encoder_outputs, encoder_state,
                           source_sequence_length):
@@ -310,6 +478,85 @@ class SimpleAttentionModel( object ):
 
 	    return cell, decoder_initial_state
 
+	##############################  Helper methods  ###############################
 
+	def init_embeddings(self, hparams, scope):
+	    """Init embeddings."""
+	    self.embedding_encoder, self.embedding_decoder = (
+	        model_helper.create_emb_for_encoder_and_decoder(
+	            share_vocab=hparams.share_vocab,
+	            src_vocab_size=self.src_vocab_size,
+	            tgt_vocab_size=self.tgt_vocab_size,
+	            src_embed_size=hparams.num_units,
+	            tgt_embed_size=hparams.num_units,
+	            num_partitions=hparams.num_embeddings_partitions,
+	            src_vocab_file=hparams.src_vocab_file,
+	            tgt_vocab_file=hparams.tgt_vocab_file,
+	            src_embed_file=hparams.src_embed_file,
+	            tgt_embed_file=hparams.tgt_embed_file,
+	            scope=scope,))
+
+	def _get_learning_rate_warmup(self, hparams):
+	    """Get learning rate warmup."""
+	    warmup_steps = hparams.warmup_steps
+	    warmup_scheme = hparams.warmup_scheme
+	    utils.print_out("  learning_rate=%g, warmup_steps=%d, warmup_scheme=%s" %
+	                    (hparams.learning_rate, warmup_steps, warmup_scheme))
+
+	    # Apply inverse decay if global steps less than warmup steps.
+	    # Inspired by https://arxiv.org/pdf/1706.03762.pdf (Section 5.3)
+	    # When step < warmup_steps,
+	    #   learing_rate *= warmup_factor ** (warmup_steps - step)
+	    if warmup_scheme == "t2t":
+			# 0.01^(1/warmup_steps): we start with a lr, 100 times smaller
+			warmup_factor = tf.exp(tf.log(0.01) / warmup_steps)
+			inv_decay = warmup_factor**(
+			  tf.to_float(warmup_steps - self.global_step))
+	    else:
+			raise ValueError("Unknown warmup scheme %s" % warmup_scheme)
+
+	    return tf.cond(
+	        self.global_step < hparams.warmup_steps,
+	        lambda: inv_decay * self.learning_rate,
+	        lambda: self.learning_rate,
+	        name="learning_rate_warump_cond")
+
+	def _get_learning_rate_decay(self, hparams):
+		"""Get learning rate decay."""
+		if hparams.decay_scheme in ["luong5", "luong10", "luong234"]:
+			decay_factor = 0.5
+			if hparams.decay_scheme == "luong5":
+				start_decay_step = int(hparams.num_train_steps / 2)
+				decay_times = 5
+			elif hparams.decay_scheme == "luong10":
+				start_decay_step = int(hparams.num_train_steps / 2)
+				decay_times = 10
+			elif hparams.decay_scheme == "luong234":
+				start_decay_step = int(hparams.num_train_steps * 2 / 3)
+				decay_times = 4
+				remain_steps = hparams.num_train_steps - start_decay_step
+				decay_steps = int(remain_steps / decay_times)
+		elif not hparams.decay_scheme:  # no decay
+			start_decay_step = hparams.num_train_steps
+			decay_steps = 0
+			decay_factor = 1.0
+		elif hparams.decay_scheme:
+			raise ValueError("Unknown decay scheme %s" % hparams.decay_scheme)
+		
+
+		utils.print_out("  decay_scheme=%s, start_decay_step=%d, decay_steps %d, "
+		                "decay_factor %g" % (hparams.decay_scheme,
+		                                     start_decay_step,
+		                                     decay_steps,
+		                                     decay_factor))
+
+		return tf.cond(
+		    self.global_step < start_decay_step,
+		    lambda: self.learning_rate,
+		    lambda: tf.train.exponential_decay(
+		        self.learning_rate,
+		        (self.global_step - start_decay_step),
+		        decay_steps, decay_factor, staircase=True),
+		    name="learning_rate_decay_cond")
 
 if __init__ == '__main__':
