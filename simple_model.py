@@ -4,7 +4,7 @@ This file is a simple text to text model to translate from the instruction to co
 I will rewrite the AttentionModel to serve my format
 """
 import tensorflow as tf
-
+from nmt.utils import vocab_utils
 """
 A very simple HParams config 
 that allows quick testing 
@@ -49,7 +49,7 @@ def create_standard_hparams():
       warmup_scheme="t2t",
       decay_scheme="luong234",
       colocate_gradients_with_ops=True,
-      num_train_steps=12000,
+      num_train_steps=1000,
 
       # Data constraints
       num_buckets=5,
@@ -398,13 +398,116 @@ class SimpleAttentionModel( object ):
 
 		## Decoder.
     	with tf.variable_scope("decoder") as decoder_scope:
+    		# decoder_initial_state is basically zeros
+    		# This is different from encoder-decoder framework
+    		# in which state of encoder is passed into decoder
     		cell, decoder_initial_state = self._build_decoder_cell(
 	          hparams, encoder_outputs, encoder_state,
 	          iterator.source_sequence_length)
 
     		## Train or eval
       		if self.mode != tf.contrib.learn.ModeKeys.INFER:
-      			
+      			# decoder_emp_inp: [max_time, batch_size, num_units]
+		        target_input = iterator.target_input
+		        if self.time_major:
+		        	target_input = tf.transpose(target_input)
+
+		        decoder_emb_inp = tf.nn.embedding_lookup(
+		            self.embedding_decoder, target_input)
+
+		        # Helper
+				helper = tf.contrib.seq2seq.TrainingHelper(
+				    decoder_emb_inp, iterator.target_sequence_length,
+				    time_major=self.time_major)
+
+				# Decoder
+		        my_decoder = tf.contrib.seq2seq.BasicDecoder(
+		            cell,
+		            helper,
+		            decoder_initial_state,)
+
+		        # Dynamic decoding
+		        outputs, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
+		            my_decoder,
+		            output_time_major=self.time_major,
+		            swap_memory=True,
+		            scope=decoder_scope)
+
+		        sample_id = outputs.sample_id
+
+		        # Note from original code: there's a subtle difference here between train and inference.
+		        # We could have set output_layer when create my_decoder
+		        #   and shared more code between train and inference.
+		        # We chose to apply the output_layer to all timesteps for speed:
+		        #   10% improvements for small models & 20% for larger ones.
+		        # If memory is a concern, we should apply output_layer per timestep.
+		        # Tuan's note: self.output_layer is a Dense layer predicting 
+		        # an output with a number of predicting classes.
+		        # outputs.rnn_output has a size of [time, batch_size, cell_size]
+		        logits = self.output_layer(outputs.rnn_output)
+
+		    ## Inference
+		    else:
+		    	beam_width = hparams.beam_width
+		        length_penalty_weight = hparams.length_penalty_weight
+		        start_tokens = tf.fill([self.batch_size], tgt_sos_id)
+		        end_token = tgt_eos_id
+
+		        if beam_width > 0:
+		        	my_decoder = tf.contrib.seq2seq.BeamSearchDecoder(
+						cell=cell,
+						embedding=self.embedding_decoder,
+						start_tokens=start_tokens,
+						end_token=end_token,
+						initial_state=decoder_initial_state,
+						beam_width=beam_width,
+						output_layer=self.output_layer,
+						length_penalty_weight=length_penalty_weight)
+
+		        else:
+		        	# Beam_width might not be very important in this problem
+		        	# But I should include it to make a comparison to the reinforcement
+		        	# learning model
+		        	# Helper
+          			sampling_temperature = hparams.sampling_temperature
+
+          			# Uses sampling (from a distribution) instead of argmax and 
+          			# passes the result through an embedding layer to get the next input.
+          			# sampling_temperature control the level of randomness (or argmax*ness*)
+          			if sampling_temperature > 0.0:
+			            helper = tf.contrib.seq2seq.SampleEmbeddingHelper(
+			                self.embedding_decoder, start_tokens, end_token,
+			                softmax_temperature=sampling_temperature,
+			                seed=hparams.random_seed)
+					else:
+						helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+						    self.embedding_decoder, start_tokens, end_token)
+
+					# Decoder
+					my_decoder = tf.contrib.seq2seq.BasicDecoder(
+						cell,
+						helper,
+						decoder_initial_state,
+						output_layer=self.output_layer  # applied per timestep
+					)
+
+				# Dynamic decoding
+		        outputs, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
+		            my_decoder,
+		            maximum_iterations=maximum_iterations,
+		            output_time_major=self.time_major,
+		            swap_memory=True,
+		            scope=decoder_scope)
+
+		        if beam_width > 0:
+		        	logits = tf.no_op()
+		        	sample_id = outputs.predicted_ids
+		        else:
+		        	# This logits has been run through the dense self.output_layer
+					logits = outputs.rnn_output
+					sample_id = outputs.sample_id
+
+		return logits, sample_id, final_context_state
 
 
 	def _build_decoder_cell(self, hparams, encoder_outputs, encoder_state,
@@ -465,7 +568,6 @@ class SimpleAttentionModel( object ):
 	        output_attention=hparams.output_attention,
 	        name="attention")
 
-	    # TODO(thangluong): do we need num_layers, num_gpus?
 	    cell = tf.contrib.rnn.DeviceWrapper(cell,
 	                                        model_helper.get_device_str(
 	                                            num_layers - 1, self.num_gpus))
@@ -560,3 +662,77 @@ class SimpleAttentionModel( object ):
 		    name="learning_rate_decay_cond")
 
 if __init__ == '__main__':
+	hparams = create_standard_hparams()
+
+	src_file = 'instructions.txt'
+	tgt_file = 'commands.txt'
+	src_vocab_file = 'instructions.vocab'
+	tgt_vocab_file = 'commands.vocab'
+
+	graph = tf.Graph()
+
+	with graph.as_default(), tf.container(scope or "train"):
+		src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
+        	src_vocab_file, tgt_vocab_file, hparams.share_vocab)
+
+		src_dataset = tf.data.TextLineDataset(src_file)
+    	tgt_dataset = tf.data.TextLineDataset(tgt_file)
+
+		# Create iterator
+		iterator = iterator_utils.get_iterator(
+	        src_dataset,
+	        tgt_dataset,
+	        src_vocab_table,
+	        tgt_vocab_table,
+	        hparams.batch_size,
+	        sos=hparams.sos,
+	        eos=hparams.eos,
+	        random_seed=hparams.random_seed,
+	        num_buckets=hparams.num_buckets,
+	        src_max_len=hparams.src_max_len_infer,
+	        tgt_max_len=hparams.tgt_max_len_infer,
+	        skip_count=skip_count_placeholder)
+
+		model = SimpleAttentionModel(
+			hparams,
+			iterator=iterator,
+			mode=tf.contrib.learn.ModeKeys.TRAIN,
+			source_vocab_table=src_vocab_table,
+			target_vocab_table=tgt_vocab_table,
+			scope=scope,
+			extra_args=extra_args)
+
+		train_sess = tf.Session()
+
+		train_sess.run(tf.global_variables_initializer())
+		# Because we run tf.contrib.lookup.index_table_from_file
+		# in vocab_utils.create_vocab_tables
+		# so this code will loads the vocabulary files, and initialize the values in the table
+		train_sess.run(tf.tables_initializer())
+
+		train_sess.run(iterator.initializer)
+
+		while global_step < num_train_steps:
+			try:
+				step_result = model.train(train_sess)
+				hparams.epoch_step += 1
+			except tf.errors.OutOfRangeError:
+				# Finished going through the training dataset.  Go to next epoch.
+				hparams.epoch_step = 0
+
+				utils.print_out(
+			          "# Finished an epoch, step %d. Perform external evaluation" %
+			          global_step)
+
+				train_sess.run(
+			          iterator.initializer,
+			          feed_dict={model.skip_count_placeholder: 0})
+
+				continue
+
+		# Done training
+
+		model.saver.save(
+		      train_sess,
+		      os.path.join("model", "translate.ckpt"),
+		      global_step=global_step)
