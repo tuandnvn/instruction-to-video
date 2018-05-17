@@ -664,10 +664,11 @@ class SimpleAttentionModel( object ):
 if __init__ == '__main__':
 	hparams = create_standard_hparams()
 
-	src_file = 'instructions.txt'
-	tgt_file = 'commands.txt'
-	src_vocab_file = 'instructions.vocab'
-	tgt_vocab_file = 'commands.vocab'
+	DATA_DIR = 'data'
+	src_file = os.path.join(DATA_DIR, 'instructions.txt')
+	tgt_file = os.path.join(DATA_DIR, 'commands.txt')
+	src_vocab_file = os.path.join(DATA_DIR,'instructions.vocab')
+	tgt_vocab_file = os.path.join(DATA_DIR,'commands.vocab')
 
 	graph = tf.Graph()
 
