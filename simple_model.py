@@ -57,7 +57,7 @@ def create_standard_hparams():
       warmup_scheme="t2t",
       decay_scheme="luong234",
       colocate_gradients_with_ops=True,
-      num_train_steps=1000,
+      num_train_steps=2000,
 
       # Data constraints
       num_buckets=5,
@@ -78,7 +78,8 @@ def create_standard_hparams():
       num_gpus=0,
       epoch_step=0,  # record where we were within an epoch.
       steps_per_stats=100,
-      steps_per_external_eval=0,
+      steps_per_eval=100,
+      steps_per_external_eval=500,
       share_vocab=False,
       metrics=["bleu"],
       log_device_placement=False,
@@ -229,6 +230,11 @@ class SimpleAttentionModel( object ):
             self.sample_words = reverse_target_vocab_table.lookup(
               tf.to_int64(sample_id))
 
+        if self.mode != tf.contrib.learn.ModeKeys.INFER:
+            ## Count the number of predicted words for compute ppl.
+            self.predict_count = tf.reduce_sum(
+              self.iterator.target_sequence_length)
+
         self.global_step = tf.Variable(0, trainable=False)
         params = tf.trainable_variables()
 
@@ -277,6 +283,7 @@ class SimpleAttentionModel( object ):
         assert self.mode == tf.contrib.learn.ModeKeys.TRAIN
         return sess.run([self.update,
                          self.train_loss,
+                         self.predict_count,
                          self.train_summary,
                          self.global_step,
                          self.batch_size,
@@ -285,6 +292,7 @@ class SimpleAttentionModel( object ):
     def eval(self, sess):
         assert self.mode == tf.contrib.learn.ModeKeys.EVAL
         return sess.run([self.eval_loss,
+                         self.predict_count,
                          self.batch_size])
 
     def infer(self, sess):
@@ -693,7 +701,7 @@ def init_stats():
 
 def update_stats(stats, start_time, step_result):
     """Update stats: write summary and accumulate statistics."""
-    (_, step_loss, step_summary, global_step, batch_size, learning_rate) = step_result
+    (_, step_loss, predict_count, step_summary, global_step, batch_size, learning_rate) = step_result
 
     # Update statistics
     stats["step_time"] += (time.time() - start_time)
@@ -701,24 +709,53 @@ def update_stats(stats, start_time, step_result):
 
     return global_step, step_summary
 
+
+def run_internal_eval(eval_model, eval_sess, eval_iterator,
+                model_dir, hparams, skip_count_placeholder):
+    """
+    Compute internal evaluation (perplexity) for both dev / test.
+
+    This function would load the model file from model_dir
+    using function tf.train.latest_checkpoint
+    in model_helper.create_or_load_model
+
+    
+    """
+    with eval_model.graph.as_default():
+        loaded_eval_model, global_step = model_helper.create_or_load_model(
+            eval_model.model, model_dir, eval_sess, "eval")
+
+    """Computing perplexity."""
+    sess.run(eval_iterator.initializer,
+            feed_dict={skip_count_placeholder: 0})
+    dev_ppl = model_helper.compute_perplexity(loaded_eval_model, eval_sess, "dev")
+
+    return dev_ppl
+
+
 if __name__ == '__main__':
     hparams = create_standard_hparams()
 
     DATA_DIR = 'data'
     src_file = os.path.join(DATA_DIR, 'instructions.txt')
     tgt_file = os.path.join(DATA_DIR, 'commands.txt')
+    # Same maze problems
+    eval_src_file = os.path.join(DATA_DIR, 'eval_instructions.txt')
+    eval_tgt_file = os.path.join(DATA_DIR, 'eval_commands.txt')
+    # Separate maze problems
+    test_src_file = os.path.join(DATA_DIR, 'test_instructions.txt')
+    test_tgt_file = os.path.join(DATA_DIR, 'test_commands.txt')
     src_vocab_file = os.path.join(DATA_DIR,'instructions.vocab')
     tgt_vocab_file = os.path.join(DATA_DIR,'commands.vocab')
 
-    
     ### Set vocab files
     src_vocab_size, src_vocab_file = vocab_utils.check_vocab(
-      src_vocab_file,
-      hparams.out_dir,
-      check_special_token=hparams.check_special_token,
-      sos=hparams.sos,
-      eos=hparams.eos,
-      unk=vocab_utils.UNK)
+        src_vocab_file,
+        hparams.out_dir,
+        check_special_token=hparams.check_special_token,
+        sos=hparams.sos,
+        eos=hparams.eos,
+        unk=vocab_utils.UNK)
     tgt_vocab_size, tgt_vocab_file = vocab_utils.check_vocab(
         tgt_vocab_file,
         hparams.out_dir,
@@ -739,6 +776,8 @@ if __name__ == '__main__':
 
     # Train configurations
     num_train_steps = hparams.num_train_steps
+    steps_per_external_eval = hparams.steps_per_external_eval
+    steps_per_eval = hparams.steps_per_eval
 
     graph = tf.Graph()
 
@@ -748,12 +787,29 @@ if __name__ == '__main__':
 
         src_dataset = tf.data.TextLineDataset(src_file)
         tgt_dataset = tf.data.TextLineDataset(tgt_file)
+        eval_src_dataset = tf.data.TextLineDataset(eval_src_file)
+        eval_tgt_dataset = tf.data.TextLineDataset(eval_tgt_file)
+
         skip_count_placeholder = tf.placeholder(shape=(), dtype=tf.int64)
 
         # Create iterator
         iterator = iterator_utils.get_iterator(
             src_dataset,
             tgt_dataset,
+            src_vocab_table,
+            tgt_vocab_table,
+            hparams.batch_size,
+            sos=hparams.sos,
+            eos=hparams.eos,
+            random_seed=hparams.random_seed,
+            num_buckets=hparams.num_buckets,
+            src_max_len=hparams.src_max_len_infer,
+            tgt_max_len=hparams.tgt_max_len_infer,
+            skip_count=skip_count_placeholder)
+
+        eval_iterator = iterator_utils.get_iterator(
+            eval_src_dataset,
+            eval_tgt_dataset,
             src_vocab_table,
             tgt_vocab_table,
             hparams.batch_size,
@@ -787,6 +843,11 @@ if __name__ == '__main__':
         train_sess.run(iterator.initializer,
             feed_dict={skip_count_placeholder: skip_count})
 
+        last_eval_step = global_step
+        last_external_eval_step = global_step
+
+        # Controlling learning rate 
+        # by global_step instead of number of epochs
         while global_step < num_train_steps:
             ### Run a step ###
             start_time = time.time()
@@ -811,6 +872,23 @@ if __name__ == '__main__':
             # Process step_result, accumulate stats, and write summary
             global_step, step_summary = update_stats(
                 stats, start_time, step_result)
+
+            if global_step - last_eval_step >= steps_per_eval:
+                last_eval_step = global_step
+                utils.print_out("# Save eval, global step %d" % global_step)
+
+                # Save checkpoint
+                loaded_train_model.saver.save(
+                  train_sess,
+                  os.path.join(out_dir, "translate.ckpt"),
+                  global_step=global_step)
+
+                # Load checkpoint into eval_model
+                # and run evaluation over eval data
+                # and get perplexity
+                run_internal_eval(
+                    eval_model, eval_sess, eval_iterator,
+                    model_dir, hparams, skip_count_placeholder)
 
         # Done training
         loaded_train_model.saver.save(
