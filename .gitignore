@@ -1,0 +1,7 @@
+__pycache__
+notebooks/.ipynb_checkpoints
+*.pyc
+**/~*.pptx
+**/~*.docx
+**/~*.xlsx
+model
