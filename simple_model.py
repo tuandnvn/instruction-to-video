@@ -78,7 +78,7 @@ def create_standard_hparams():
       num_gpus=0,
       epoch_step=0,  # record where we were within an epoch.
       steps_per_stats=100,
-      steps_per_eval=100,
+      steps_per_eval=50,
       steps_per_external_eval=500,
       share_vocab=False,
       metrics=["bleu"],
@@ -710,7 +710,7 @@ def update_stats(stats, start_time, step_result):
     return global_step, step_summary
 
 
-def run_internal_eval(eval_model, eval_sess, eval_iterator,
+def run_internal_eval(eval_model, eval_sess, eval_iterator, eval_graph,
                 model_dir, hparams, skip_count_placeholder):
     """
     Compute internal evaluation (perplexity) for both dev / test.
@@ -721,12 +721,12 @@ def run_internal_eval(eval_model, eval_sess, eval_iterator,
 
     
     """
-    with eval_model.graph.as_default():
+    with eval_graph.as_default():
         loaded_eval_model, global_step = model_helper.create_or_load_model(
-            eval_model.model, model_dir, eval_sess, "eval")
+            eval_model, model_dir, eval_sess, "eval")
 
     """Computing perplexity."""
-    sess.run(eval_iterator.initializer,
+    eval_sess.run(eval_iterator.initializer,
             feed_dict={skip_count_placeholder: 0})
     dev_ppl = model_helper.compute_perplexity(loaded_eval_model, eval_sess, "dev")
 
@@ -780,6 +780,7 @@ if __name__ == '__main__':
     steps_per_eval = hparams.steps_per_eval
 
     graph = tf.Graph()
+    eval_graph = tf.Graph()
 
     with graph.as_default(), tf.container("train"):
         src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
@@ -787,9 +788,7 @@ if __name__ == '__main__':
 
         src_dataset = tf.data.TextLineDataset(src_file)
         tgt_dataset = tf.data.TextLineDataset(tgt_file)
-        eval_src_dataset = tf.data.TextLineDataset(eval_src_file)
-        eval_tgt_dataset = tf.data.TextLineDataset(eval_tgt_file)
-
+        
         skip_count_placeholder = tf.placeholder(shape=(), dtype=tf.int64)
 
         # Create iterator
@@ -807,6 +806,23 @@ if __name__ == '__main__':
             tgt_max_len=hparams.tgt_max_len_infer,
             skip_count=skip_count_placeholder)
 
+        # Create models
+        model = SimpleAttentionModel(
+            hparams,
+            iterator=iterator,
+            mode=tf.contrib.learn.ModeKeys.TRAIN,
+            source_vocab_table=src_vocab_table,
+            target_vocab_table=tgt_vocab_table)
+    
+    with eval_graph.as_default(), tf.container("eval"):
+        src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
+            src_vocab_file, tgt_vocab_file, hparams.share_vocab)
+
+        # Eval
+        eval_src_dataset = tf.data.TextLineDataset(eval_src_file)
+        eval_tgt_dataset = tf.data.TextLineDataset(eval_tgt_file)
+        eval_skip_count_placeholder = tf.placeholder(shape=(), dtype=tf.int64)
+
         eval_iterator = iterator_utils.get_iterator(
             eval_src_dataset,
             eval_tgt_dataset,
@@ -819,81 +835,83 @@ if __name__ == '__main__':
             num_buckets=hparams.num_buckets,
             src_max_len=hparams.src_max_len_infer,
             tgt_max_len=hparams.tgt_max_len_infer,
-            skip_count=skip_count_placeholder)
+            skip_count=eval_skip_count_placeholder)
 
-        model = SimpleAttentionModel(
+        eval_model = SimpleAttentionModel(
             hparams,
-            iterator=iterator,
-            mode=tf.contrib.learn.ModeKeys.TRAIN,
+            iterator=eval_iterator,
+            mode=tf.contrib.learn.ModeKeys.EVAL,
             source_vocab_table=src_vocab_table,
-            target_vocab_table=tgt_vocab_table,
-            scope='train')
+            target_vocab_table=tgt_vocab_table)
 
-        train_sess = tf.Session()
 
+    train_sess = tf.Session( graph = graph )
+    eval_sess = tf.Session( graph = eval_graph )
+
+    with graph.as_default():
         loaded_train_model, global_step = model_helper.create_or_load_model(
             model, hparams.out_dir, train_sess, "train")
 
-        # Before train
-        start_train_time = time.time()
-        stats = init_stats()
-        skip_count = hparams.batch_size * hparams.epoch_step
-        utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
+    # Before train
+    start_train_time = time.time()
+    stats = init_stats()
+    skip_count = hparams.batch_size * hparams.epoch_step
+    utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
 
-        train_sess.run(iterator.initializer,
-            feed_dict={skip_count_placeholder: skip_count})
+    train_sess.run(iterator.initializer,
+        feed_dict={skip_count_placeholder: skip_count})
 
-        last_eval_step = global_step
-        last_external_eval_step = global_step
+    last_eval_step = global_step
+    last_external_eval_step = global_step
 
-        # Controlling learning rate 
-        # by global_step instead of number of epochs
-        while global_step < num_train_steps:
-            ### Run a step ###
-            start_time = time.time()
+    # Controlling learning rate 
+    # by global_step instead of number of epochs
+    while global_step < num_train_steps:
+        ### Run a step ###
+        start_time = time.time()
 
-            try:
-                step_result = loaded_train_model.train(train_sess)
-                hparams.epoch_step += 1
-            except tf.errors.OutOfRangeError:
-                # Finished going through the training dataset.  Go to next epoch.
-                hparams.epoch_step = 0
+        try:
+            step_result = loaded_train_model.train(train_sess)
+            hparams.epoch_step += 1
+        except tf.errors.OutOfRangeError:
+            # Finished going through the training dataset.  Go to next epoch.
+            hparams.epoch_step = 0
 
-                utils.print_out(
-                      "# Finished an epoch, step %d. Perform external evaluation" %
-                      global_step)
+            utils.print_out(
+                  "# Finished an epoch, step %d." %
+                  global_step)
 
-                train_sess.run(iterator.initializer,
-                    feed_dict={skip_count_placeholder: 0})
+            train_sess.run(iterator.initializer,
+                feed_dict={skip_count_placeholder: 0})
 
-                continue
+            continue
 
 
-            # Process step_result, accumulate stats, and write summary
-            global_step, step_summary = update_stats(
-                stats, start_time, step_result)
+        # Process step_result, accumulate stats, and write summary
+        global_step, step_summary = update_stats(
+            stats, start_time, step_result)
 
-            if global_step - last_eval_step >= steps_per_eval:
-                last_eval_step = global_step
-                utils.print_out("# Save eval, global step %d" % global_step)
+        if global_step - last_eval_step >= steps_per_eval:
+            last_eval_step = global_step
+            utils.print_out("# Save eval, global step %d" % global_step)
 
-                # Save checkpoint
-                loaded_train_model.saver.save(
-                  train_sess,
-                  os.path.join(out_dir, "translate.ckpt"),
-                  global_step=global_step)
-
-                # Load checkpoint into eval_model
-                # and run evaluation over eval data
-                # and get perplexity
-                run_internal_eval(
-                    eval_model, eval_sess, eval_iterator,
-                    model_dir, hparams, skip_count_placeholder)
-
-        # Done training
-        loaded_train_model.saver.save(
+            # Save checkpoint
+            loaded_train_model.saver.save(
               train_sess,
               os.path.join("model", "translate.ckpt"),
               global_step=global_step)
 
-        utils.print_time("# Done training!", start_train_time)
+            # Load checkpoint into eval_model
+            # and run evaluation over eval data
+            # and get perplexity
+            run_internal_eval(
+                eval_model, eval_sess, eval_iterator, eval_graph,
+                "model", hparams, eval_skip_count_placeholder)
+
+    # Done training
+    loaded_train_model.saver.save(
+          train_sess,
+          os.path.join("model", "translate.ckpt"),
+          global_step=global_step)
+
+    utils.print_time("# Done training!", start_train_time)
