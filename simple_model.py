@@ -49,7 +49,7 @@ def create_standard_hparams():
 
       # Train
       optimizer="sgd",
-      batch_size=32,
+      batch_size=64,
       init_op="uniform",
       init_weight=0.1,
       learning_rate=1.0,
@@ -57,10 +57,10 @@ def create_standard_hparams():
       warmup_scheme="t2t",
       decay_scheme="luong234",
       colocate_gradients_with_ops=True,
-      num_train_steps=2000,
+      num_train_steps=4000,
 
       # Data constraints
-      num_buckets=5,
+      num_buckets=2,
       max_train=0,
       src_max_len=100,
       tgt_max_len=20,
@@ -77,8 +77,8 @@ def create_standard_hparams():
       forget_bias=1.0,
       num_gpus=0,
       epoch_step=0,  # record where we were within an epoch.
-      steps_per_stats=100,
-      steps_per_eval=50,
+      steps_per_stats=50,
+      steps_per_eval=200,
       steps_per_external_eval=500,
       share_vocab=False,
       metrics=["bleu"],
@@ -88,7 +88,7 @@ def create_standard_hparams():
       beam_width=2,
       length_penalty_weight=0.0,
       override_loaded_hparams=True,
-      num_keep_ckpts=5,
+      num_keep_ckpts=1,
       avg_ckpts=False,
 
       # For inference
@@ -215,9 +215,7 @@ class SimpleAttentionModel( object ):
 
             ## Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
-                with tf.device(model_helper.get_device_str(self.num_encoder_layers - 1,
-                                                           self.num_gpus)):
-                    loss = self._compute_loss(logits)
+                loss = self._compute_loss(logits)
             else:
                 loss = None
 
@@ -254,8 +252,16 @@ class SimpleAttentionModel( object ):
             elif hparams.optimizer == "adam":
                 opt = tf.train.AdamOptimizer(self.learning_rate)
 
-            self.update = opt.minimize(self.train_loss, 
-                    global_step=self.global_step)
+            # Gradients
+            gradients = tf.gradients(
+                self.train_loss,
+                params,
+                colocate_gradients_with_ops=hparams.colocate_gradients_with_ops)
+
+            clipped_grads, grad_norm = tf.clip_by_global_norm(gradients, 5)
+
+            self.update = opt.apply_gradients(
+              zip(clipped_grads, params), global_step=self.global_step)
 
             # Summary
             self.train_summary = tf.summary.merge([
@@ -778,6 +784,7 @@ if __name__ == '__main__':
     num_train_steps = hparams.num_train_steps
     steps_per_external_eval = hparams.steps_per_external_eval
     steps_per_eval = hparams.steps_per_eval
+    steps_per_stats = hparams.steps_per_stats
 
     graph = tf.Graph()
     eval_graph = tf.Graph()
@@ -861,6 +868,7 @@ if __name__ == '__main__':
     train_sess.run(iterator.initializer,
         feed_dict={skip_count_placeholder: skip_count})
 
+    last_stats_step = global_step
     last_eval_step = global_step
     last_external_eval_step = global_step
 
@@ -872,6 +880,7 @@ if __name__ == '__main__':
 
         try:
             step_result = loaded_train_model.train(train_sess)
+
             hparams.epoch_step += 1
         except tf.errors.OutOfRangeError:
             # Finished going through the training dataset.  Go to next epoch.
@@ -886,10 +895,14 @@ if __name__ == '__main__':
 
             continue
 
-
         # Process step_result, accumulate stats, and write summary
         global_step, step_summary = update_stats(
             stats, start_time, step_result)
+
+        # Once in a while, we print statistics.
+        if global_step - last_stats_step >= steps_per_stats:
+            last_stats_step = global_step
+            utils.print_out("Learning rate = %.2f" % step_result[-1])
 
         if global_step - last_eval_step >= steps_per_eval:
             last_eval_step = global_step
