@@ -4,4 +4,4 @@ notebooks/.ipynb_checkpoints
 **/~*.pptx
 **/~*.docx
 **/~*.xlsx
-model/*
+model/*.*
