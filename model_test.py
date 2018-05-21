@@ -140,9 +140,9 @@ if __name__ == '__main__':
                      src_placeholder,
                      batch_size_placeholder)
 
+        # Decode 10 samples on eval data
         print ('=============================================')
         print ('Test quality on eval data')
-        # Decode 10 samples on eval data
         _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
                      infer_iterator, eval_src_data, eval_tgt_data,
                      src_placeholder,
