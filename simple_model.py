@@ -26,15 +26,16 @@ def create_standard_hparams():
       test_prefix="",
       vocab_prefix="",
       embed_prefix="",
-      out_dir="",
+      out_dir="temp",
 
       # Networks
       # num_units is embedding dimension
-      num_units=64,
+      # and also the cell/memory dimension
+      num_units=128,
       num_layers=2, # not used
       num_encoder_layers=1,
       num_decoder_layers=1,
-      dropout=0.2,
+      dropout=0.5,
       unit_type="lstm",
       encoder_type="uni", # Unidirection for simplicity
       residual=False,
@@ -52,12 +53,12 @@ def create_standard_hparams():
       batch_size=64,
       init_op="uniform",
       init_weight=0.1,
-      learning_rate=1.0,
+      learning_rate=0.2,
       warmup_steps=0,
       warmup_scheme="t2t",
-      decay_scheme="luong234",
+      decay_scheme="luong5",
       colocate_gradients_with_ops=True,
-      num_train_steps=4000,
+      num_train_steps=2000,
 
       # Data constraints
       num_buckets=2,
@@ -88,7 +89,7 @@ def create_standard_hparams():
       beam_width=2,
       length_penalty_weight=0.0,
       override_loaded_hparams=True,
-      num_keep_ckpts=1,
+      num_keep_ckpts=4,
       avg_ckpts=False,
 
       # For inference
@@ -674,8 +675,8 @@ class SimpleAttentionModel( object ):
             elif hparams.decay_scheme == "luong234":
                 start_decay_step = int(hparams.num_train_steps * 2 / 3)
                 decay_times = 4
-                remain_steps = hparams.num_train_steps - start_decay_step
-                decay_steps = int(remain_steps / decay_times)
+            remain_steps = hparams.num_train_steps - start_decay_step
+            decay_steps = int(remain_steps / decay_times)
         elif not hparams.decay_scheme:  # no decay
             start_decay_step = hparams.num_train_steps
             decay_steps = 0
@@ -703,15 +704,16 @@ class SimpleAttentionModel( object ):
 
 def init_stats():
   """Initialize statistics that we want to accumulate."""
-  return {"step_time": 0.0, "loss": 0.0 }
+  return {"step_time": 0.0, "loss": 0.0, "predict_count": 0.0 }
 
 def update_stats(stats, start_time, step_result):
     """Update stats: write summary and accumulate statistics."""
-    (_, step_loss, predict_count, step_summary, global_step, batch_size, learning_rate) = step_result
+    (_, step_loss, step_predict_count, step_summary, global_step, batch_size, learning_rate) = step_result
 
     # Update statistics
     stats["step_time"] += (time.time() - start_time)
     stats["loss"] += (step_loss * batch_size)
+    stats["predict_count"] += step_predict_count
 
     return global_step, step_summary
 
@@ -738,6 +740,16 @@ def run_internal_eval(eval_model, eval_sess, eval_iterator, eval_graph,
 
     return dev_ppl
 
+def run_external_eval():
+    """
+    External evaluation using the following formula:
+
+    Consider two trajectories starting from a same starting point
+
+    At any time these two trajectories intercept, i.e. having a shared cell,
+    we calculate the 
+    """
+    pass
 
 if __name__ == '__main__':
     hparams = create_standard_hparams()
@@ -872,6 +884,9 @@ if __name__ == '__main__':
     last_eval_step = global_step
     last_external_eval_step = global_step
 
+    train_ppls = []
+    dev_ppls = []
+
     # Controlling learning rate 
     # by global_step instead of number of epochs
     while global_step < num_train_steps:
@@ -904,6 +919,15 @@ if __name__ == '__main__':
             last_stats_step = global_step
             utils.print_out("Learning rate = %.2f" % step_result[-1])
 
+            train_ppl = utils.safe_exp(stats["loss"] / stats["predict_count"])
+            utils.print_out("Train perplexity = %.2f" % train_ppl)
+
+            train_ppls.append((global_step, train_ppl))
+
+            # Reset statistics
+            stats = init_stats()
+
+        # Evaluation steps
         if global_step - last_eval_step >= steps_per_eval:
             last_eval_step = global_step
             utils.print_out("# Save eval, global step %d" % global_step)
@@ -917,9 +941,11 @@ if __name__ == '__main__':
             # Load checkpoint into eval_model
             # and run evaluation over eval data
             # and get perplexity
-            run_internal_eval(
+            dev_ppl = run_internal_eval(
                 eval_model, eval_sess, eval_iterator, eval_graph,
                 "model", hparams, eval_skip_count_placeholder)
+
+            dev_ppls.append((global_step, dev_ppl))
 
     # Done training
     loaded_train_model.saver.save(
@@ -928,3 +954,8 @@ if __name__ == '__main__':
           global_step=global_step)
 
     utils.print_time("# Done training!", start_train_time)
+
+    print ('train_ppls')
+    print (train_ppls)
+    print ('dev_ppls')
+    print (dev_ppls)
