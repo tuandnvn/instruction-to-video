@@ -740,17 +740,6 @@ def run_internal_eval(eval_model, eval_sess, eval_iterator, eval_graph,
 
     return dev_ppl
 
-def run_external_eval():
-    """
-    External evaluation using the following formula:
-
-    Consider two trajectories starting from a same starting point
-
-    At any time these two trajectories intercept, i.e. having a shared cell,
-    we calculate the 
-    """
-    pass
-
 if __name__ == '__main__':
     hparams = create_standard_hparams()
 

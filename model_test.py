@@ -14,7 +14,7 @@ import iterator_utils
 def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
                    tgt_data, iterator_src_placeholder,
                    iterator_batch_size_placeholder, size = 10):
-	"""Pick a sentence and decode."""
+	"""Pick $size sentence and decode."""
 	decode_ids = np.random.randint(0, len(src_data) - 1, size = size)
 	#utils.print_out("  # %d" % decode_id)
 
@@ -43,6 +43,151 @@ def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
 		utils.print_out("    src: %s" % src_data[decode_id])
 		utils.print_out("    ref: %s" % tgt_data[decode_id])
 		utils.print_out(b"    nmt: " + translation)
+
+def run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
+                model_dir, hparams, src_file, tgt_file, 
+                iterator_src_placeholder,
+                iterator_batch_size_placeholder):
+    """
+    External evaluation using the following formula:
+
+    
+    """
+    with infer_graph.as_default():
+        loaded_infer_model, global_step = model_helper.create_or_load_model(
+            infer_model, model_dir, infer_sess, "infer")
+
+    dev_infer_iterator_feed_dict = {
+      iterator_src_placeholder: inference.load_data(src_file),
+      iterator_batch_size_placeholder: hparams.infer_batch_size,
+    }
+
+    dev_scores = _external_eval(
+        loaded_infer_model,
+        global_step,
+        infer_sess,
+        hparams,
+        infer_iterator,
+        dev_infer_iterator_feed_dict,
+        tgt_file,
+        "dev")
+
+def _external_eval(model, global_step, sess, hparams, iterator,
+                   iterator_feed_dict, tgt_file, label):
+    out_dir = hparams.out_dir
+    beam_width = hparams.beam_width
+    metrics = hparams.metrics
+    subword_option = hparams.subword_option
+
+    sess.run(iterator, feed_dict=iterator_feed_dict)
+
+    # First create a trans file to write output
+    trans_file = os.path.join(out_dir, "output_%s" % label)
+
+    utils.print_out("  decoding to output %s." % trans_file)
+
+    start_time = time.time()
+    num_sentences = 0
+    with codecs.getwriter("utf-8")(tf.gfile.GFile(trans_file, mode="wb")) as trans_f:
+        trans_f.write("")  # Write empty string to ensure file is created.
+
+        while True:
+            try:
+                nmt_outputs, _ = model.decode(sess)
+                if beam_width == 0:
+                    nmt_outputs = np.expand_dims(nmt_outputs, 0)
+
+                batch_size = nmt_outputs.shape[1]
+                num_sentences += batch_size
+
+                for sent_id in range(batch_size):
+                    translation = get_translation(
+                        nmt_outputs[0],
+                        sent_id,
+                        tgt_eos=hparams.eos,
+                        subword_option=subword_option)
+                    trans_f.write((translation + b"\n").decode("utf-8"))
+                except tf.errors.OutOfRangeError:
+                    utils.print_time(
+                    "  done, num sentences %d, num translations per input %d" %
+                    (num_sentences, beam_width), start_time)
+                break
+
+    # Evaluation
+    evaluation_scores = {}
+    if tgt_file and tf.gfile.Exists(trans_file):
+        for metric in metrics:
+            score = _score_evaluate(
+                tgt_file,
+                trans_file,
+                metric)
+            evaluation_scores[metric] = score
+            utils.print_out("  %s %s: %.1f" % (metric, label, score))
+
+    return evaluation_scores
+
+def _word_accuracy(ref_file, trans_file):
+	"""Compute accuracy on per word basis."""
+	with codecs.getreader("utf-8")(tf.gfile.GFile(ref_file, "r")) as label_fh:
+		with codecs.getreader("utf-8")(tf.gfile.GFile(trans_file, "r")) as pred_fh:
+			total_acc, total_count = 0., 0.
+			for sentence in label_fh:
+				labels = sentence.strip().split(" ")
+				preds = pred_fh.readline().strip().split(" ")
+				match = 0.0
+				for pos in range(min(len(labels), len(preds))):
+					label = labels[pos]
+					pred = preds[pos]
+					if label == pred:
+						match += 1
+				total_acc += 100 * match / max(len(labels), len(preds))
+				total_count += 1
+	return total_acc / total_count
+
+def _neighbor(ref_file, trans_file, 
+			  ref_to_video, trans_to_video,
+			  video_folder):
+	"""
+	ref_to_video: a function that map from a line index from ref_file to a video file (0-299)
+	trans_to_video: similar to ref_to_video, but for trans_file
+	video_folder: where you store videos, by default this code would examine
+
+	We should expect ref_to_video[ref_id] == trans_to_video[trans_id]
+
+	"""
+	refs = []
+	trans = []
+
+	with codecs.getreader("utf-8")(tf.gfile.GFile(ref_file, "r")) as label_fh:
+		with codecs.getreader("utf-8")(tf.gfile.GFile(trans_file, "r")) as pred_fh:
+			counter = 0
+
+			for sentence in label_fh:
+				labels = sentence.strip().split(" ")
+				preds = pred_fh.readline().strip().split(" ")
+
+				refs.append(labels)
+				trans.append(preds)
+
+
+	for i, (ref, tran) in enumerate(zip(refs, trans)):
+		ref_video = ref_to_video[i]
+		trans_video = trans_to_video[i]
+
+		if ref_video != trans_video:
+			raise ValueError('ref_video = %s, trans_video = %s' % (str(ref_video), str(trans_video)) )
+
+		
+
+	counter += 1
+
+def _score_evaluate ( ref_file, trans_file, metric ):
+	if metric.lower() == "word_accuracy":
+	    evaluation_score = _word_accuracy(ref_file, trans_file)
+	if metric.lower() == "neighbor":
+	    evaluation_score = _neighbor(ref_file, trans_file)
+
+	return evaluation_score
 
 if __name__ == '__main__':
     hparams = create_standard_hparams()
@@ -85,7 +230,6 @@ if __name__ == '__main__':
     hparams.add_hparam("src_embed_file", "")
     hparams.add_hparam("tgt_embed_file", "")
 
-
     out_dir = hparams.out_dir
 
     infer_graph = tf.Graph()
@@ -118,7 +262,6 @@ if __name__ == '__main__':
             batch_size=batch_size_placeholder,
             eos=hparams.eos,
             src_max_len=hparams.src_max_len_infer)
-
 
         infer_model = SimpleAttentionModel(
             hparams,
