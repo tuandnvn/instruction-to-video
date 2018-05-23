@@ -3,6 +3,8 @@ Load a model ckpt file, and evaluate its performance over
 internal vs external evaluation
 """
 import os, numpy as np
+import time
+import codecs
 import tensorflow as tf
 from tensorflow.python.ops import lookup_ops
 from simple_model import create_standard_hparams, SimpleAttentionModel
@@ -10,44 +12,46 @@ from nmt import inference, train, model_helper
 from nmt.utils import vocab_utils, nmt_utils
 from nmt.utils import misc_utils as utils
 import iterator_utils
+from evaluation_utils import shortest_neighbor_score
 
 def _sample_decode(model, global_step, sess, hparams, iterator, src_data,
                    tgt_data, iterator_src_placeholder,
                    iterator_batch_size_placeholder, size = 10):
-	"""Pick $size sentence and decode."""
-	decode_ids = np.random.randint(0, len(src_data) - 1, size = size)
-	#utils.print_out("  # %d" % decode_id)
+    """Pick $size sentence and decode."""
+    decode_ids = np.random.randint(0, len(src_data) - 1, size = size)
+    #utils.print_out("  # %d" % decode_id)
 
-	iterator_feed_dict = {
-	  iterator_src_placeholder: [src_data[decode_id] for decode_id in decode_ids],
-	  iterator_batch_size_placeholder: size,
-	}
-	sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
+    iterator_feed_dict = {
+      iterator_src_placeholder: [src_data[decode_id] for decode_id in decode_ids],
+      iterator_batch_size_placeholder: size,
+    }
+    sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
-	# nmt_outputs.shape = (2, 10, 20)
-	# (hparams.beam_width, size, hparams.tgt_max_len)
-	nmt_outputs, _ = model.decode(sess)
+    # nmt_outputs.shape = (2, 10, 20)
+    # (hparams.beam_width, size, hparams.tgt_max_len)
+    nmt_outputs, _ = model.decode(sess)
 
-	if hparams.beam_width > 0:
-		# get the top translation.
-		nmt_outputs = nmt_outputs[0]
+    if hparams.beam_width > 0:
+        # get the top translation.
+        nmt_outputs = nmt_outputs[0]
 
-	# nmt_outputs.shape = (10, 20)
-	for i, decode_id in enumerate(decode_ids):
-		translation = nmt_utils.get_translation(
-			nmt_outputs,
-			sent_id=i,
-			tgt_eos=hparams.eos,
-			subword_option=None)
-		utils.print_out("  # %d" % decode_id)
-		utils.print_out("    src: %s" % src_data[decode_id])
-		utils.print_out("    ref: %s" % tgt_data[decode_id])
-		utils.print_out(b"    nmt: " + translation)
+    # nmt_outputs.shape = (10, 20)
+    for i, decode_id in enumerate(decode_ids):
+        translation = nmt_utils.get_translation(
+            nmt_outputs,
+            sent_id=i,
+            tgt_eos=hparams.eos,
+            subword_option=None)
+        utils.print_out("  # %d" % decode_id)
+        utils.print_out("    src: %s" % src_data[decode_id])
+        utils.print_out("    ref: %s" % tgt_data[decode_id])
+        utils.print_out(b"    nmt: " + translation)
 
 def run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
-                model_dir, hparams, src_file, tgt_file, 
+                model_dir, hparams, src_data, tgt_file, 
                 iterator_src_placeholder,
-                iterator_batch_size_placeholder):
+                iterator_batch_size_placeholder,
+                line_to_video):
     """
     External evaluation using the following formula:
 
@@ -58,7 +62,7 @@ def run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
             infer_model, model_dir, infer_sess, "infer")
 
     dev_infer_iterator_feed_dict = {
-      iterator_src_placeholder: inference.load_data(src_file),
+      iterator_src_placeholder: src_data,
       iterator_batch_size_placeholder: hparams.infer_batch_size,
     }
 
@@ -70,16 +74,17 @@ def run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
         infer_iterator,
         dev_infer_iterator_feed_dict,
         tgt_file,
-        "dev")
+        "dev",
+        line_to_video)
 
 def _external_eval(model, global_step, sess, hparams, iterator,
-                   iterator_feed_dict, tgt_file, label):
+                   iterator_feed_dict, tgt_file, label, line_to_video):
     out_dir = hparams.out_dir
     beam_width = hparams.beam_width
     metrics = hparams.metrics
     subword_option = hparams.subword_option
 
-    sess.run(iterator, feed_dict=iterator_feed_dict)
+    sess.run(iterator.initializer, feed_dict=iterator_feed_dict)
 
     # First create a trans file to write output
     trans_file = os.path.join(out_dir, "output_%s" % label)
@@ -101,14 +106,14 @@ def _external_eval(model, global_step, sess, hparams, iterator,
                 num_sentences += batch_size
 
                 for sent_id in range(batch_size):
-                    translation = get_translation(
+                    translation = nmt_utils.get_translation(
                         nmt_outputs[0],
                         sent_id,
                         tgt_eos=hparams.eos,
                         subword_option=subword_option)
                     trans_f.write((translation + b"\n").decode("utf-8"))
-                except tf.errors.OutOfRangeError:
-                    utils.print_time(
+            except tf.errors.OutOfRangeError:
+                utils.print_time(
                     "  done, num sentences %d, num translations per input %d" %
                     (num_sentences, beam_width), start_time)
                 break
@@ -120,74 +125,75 @@ def _external_eval(model, global_step, sess, hparams, iterator,
             score = _score_evaluate(
                 tgt_file,
                 trans_file,
-                metric)
+                metric,
+                line_to_video)
             evaluation_scores[metric] = score
-            utils.print_out("  %s %s: %.1f" % (metric, label, score))
+            utils.print_out("  %s %s: %.2f" % (metric, label, score))
 
     return evaluation_scores
 
 def _word_accuracy(ref_file, trans_file):
-	"""Compute accuracy on per word basis."""
-	with codecs.getreader("utf-8")(tf.gfile.GFile(ref_file, "r")) as label_fh:
-		with codecs.getreader("utf-8")(tf.gfile.GFile(trans_file, "r")) as pred_fh:
-			total_acc, total_count = 0., 0.
-			for sentence in label_fh:
-				labels = sentence.strip().split(" ")
-				preds = pred_fh.readline().strip().split(" ")
-				match = 0.0
-				for pos in range(min(len(labels), len(preds))):
-					label = labels[pos]
-					pred = preds[pos]
-					if label == pred:
-						match += 1
-				total_acc += 100 * match / max(len(labels), len(preds))
-				total_count += 1
-	return total_acc / total_count
-
+    """Compute accuracy on per word basis."""
+    with codecs.getreader("utf-8")(tf.gfile.GFile(ref_file, "r")) as label_fh:
+        with codecs.getreader("utf-8")(tf.gfile.GFile(trans_file, "r")) as pred_fh:
+            total_acc, total_count = 0., 0.
+            for sentence in label_fh:
+                labels = sentence.strip().split(" ")
+                preds = pred_fh.readline().strip().split(" ")
+                match = 0.0
+                for pos in range(min(len(labels), len(preds))):
+                    label = labels[pos]
+                    pred = preds[pos]
+                    if label == pred:
+                        match += 1
+                total_acc += 100 * match / max(len(labels), len(preds))
+                total_count += 1
+    return total_acc / total_count
+    
 def _neighbor(ref_file, trans_file, 
-			  ref_to_video, trans_to_video,
-			  video_folder):
-	"""
-	ref_to_video: a function that map from a line index from ref_file to a video file (0-299)
-	trans_to_video: similar to ref_to_video, but for trans_file
-	video_folder: where you store videos, by default this code would examine
+              line_to_video):
+    """
+    line_to_video: a function that map from a line index from ref_file to a video file (0-299)
 
-	We should expect ref_to_video[ref_id] == trans_to_video[trans_id]
+    We should expect ref_to_video[ref_id] == trans_to_video[trans_id]
 
-	"""
-	refs = []
-	trans = []
+    """
+    refs = []
+    trans = []
 
-	with codecs.getreader("utf-8")(tf.gfile.GFile(ref_file, "r")) as label_fh:
-		with codecs.getreader("utf-8")(tf.gfile.GFile(trans_file, "r")) as pred_fh:
-			counter = 0
+    with open(ref_file, 'r') as label_fh:
+        with open(trans_file, 'r') as pred_fh:
+            for sentence in label_fh:
+                labels = sentence.strip().split(" ")
+                preds = pred_fh.readline().strip().split(" ")
 
-			for sentence in label_fh:
-				labels = sentence.strip().split(" ")
-				preds = pred_fh.readline().strip().split(" ")
+                refs.append(labels)
+                trans.append(preds)
 
-				refs.append(labels)
-				trans.append(preds)
+    scores = []
+    l1s = []
+    l2s = []
+    for i, (ref, tran) in enumerate(zip(refs, trans)):
+        ref_video = line_to_video(i)
 
+        score, l1, l2 = shortest_neighbor_score ( ref,  tran, ref_video )
 
-	for i, (ref, tran) in enumerate(zip(refs, trans)):
-		ref_video = ref_to_video[i]
-		trans_video = trans_to_video[i]
+        scores.append(score)
+        l1s.append(l1)
+        l2s.append(l2)
 
-		if ref_video != trans_video:
-			raise ValueError('ref_video = %s, trans_video = %s' % (str(ref_video), str(trans_video)) )
+    print ('%.3f' % np.average ( l1 ))
+    print ('%.3f' % np.average ( l2 ))
 
-		
+    return np.average ( scores )
 
-	counter += 1
+def _score_evaluate ( ref_file, trans_file, metric, line_to_video ):
+    if metric.lower() == "word_accuracy":
+        evaluation_score = _word_accuracy(ref_file, trans_file)
+    if metric.lower() == "neighbor":
+        evaluation_score = _neighbor(ref_file, trans_file, line_to_video)
 
-def _score_evaluate ( ref_file, trans_file, metric ):
-	if metric.lower() == "word_accuracy":
-	    evaluation_score = _word_accuracy(ref_file, trans_file)
-	if metric.lower() == "neighbor":
-	    evaluation_score = _neighbor(ref_file, trans_file)
-
-	return evaluation_score
+    return evaluation_score
 
 if __name__ == '__main__':
     hparams = create_standard_hparams()
@@ -272,21 +278,34 @@ if __name__ == '__main__':
             target_vocab_table=tgt_vocab_table)
 
 
-        loaded_infer_model, global_step = model_helper.create_or_load_model(
-            infer_model, os.path.join("model", "model-2"), infer_sess, "infer")
+        # loaded_infer_model, global_step = model_helper.create_or_load_model(
+        #     infer_model, os.path.join("model", "model-4"), infer_sess, "infer")
+        # # Decode 10 samples on train data
+        # print ('=============================================')
+        # print ('Test quality on train data')
+        # _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
+        #              infer_iterator, train_src_data, train_tgt_data,
+        #              src_placeholder,
+        #              batch_size_placeholder)
+        # # Decode 10 samples on eval data
+        # print ('=============================================')
+        # print ('Test quality on eval data')
+        # _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
+        #              infer_iterator, eval_src_data, eval_tgt_data,
+        #              src_placeholder,
+        #              batch_size_placeholder)
 
-        # Decode 10 samples on train data
-        print ('=============================================')
-        print ('Test quality on train data')
-        _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
-                     infer_iterator, train_src_data, train_tgt_data,
-                     src_placeholder,
-                     batch_size_placeholder)
+        def eval_line_to_video ( line ):
+            directory = line // 100
 
-        # Decode 10 samples on eval data
-        print ('=============================================')
-        print ('Test quality on eval data')
-        _sample_decode(loaded_infer_model, global_step, infer_sess, hparams,
-                     infer_iterator, eval_src_data, eval_tgt_data,
-                     src_placeholder,
-                     batch_size_placeholder)
+            return os.path.join('target', str(directory), str(line) + '.mp4')
+
+        run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
+                os.path.join("model", "model-5"), hparams, eval_src_data, eval_tgt_file, 
+                src_placeholder,
+                batch_size_placeholder,
+                eval_line_to_video)
+
+        # score = _neighbor(eval_tgt_file, os.path.join('temp', 'output_dev'), 
+        #       eval_line_to_video)
+        # print (score)

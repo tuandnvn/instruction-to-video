@@ -82,7 +82,7 @@ def create_standard_hparams():
       steps_per_eval=200,
       steps_per_external_eval=500,
       share_vocab=False,
-      metrics=["bleu"],
+      metrics=["neighbor"],
       log_device_placement=False,
       random_seed=None,
       # only enable beam search during inference when beam_width > 0.

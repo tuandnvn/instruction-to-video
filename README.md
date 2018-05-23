@@ -21,3 +21,10 @@ move the purple block down until it is in position between the 2 red L shapes an
 move the purple block down on the right of the blue L left and between the 2 red Ls to the left of the purple L
 ```
 
+## Needed library
+
+```
+pip install opencv-python
+
+pip install tensorflow==1.8.0
+```
