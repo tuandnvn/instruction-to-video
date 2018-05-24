@@ -11,6 +11,7 @@ import iterator_utils
 from nmt import model_helper
 from nmt.utils import misc_utils as utils
 from tensorflow.python.layers.core import Dense
+import helper as helper_utils
 
 """
 A very simple HParams config 
@@ -443,11 +444,12 @@ class SimpleAttentionModel( object ):
                 if self.time_major:
                     target_input = tf.transpose(target_input)
 
+                # decoder_emb_inp.get_shape() = (max_time, batch_size, 128)
                 decoder_emb_inp = tf.nn.embedding_lookup(
                     self.embedding_decoder, target_input)
 
                 # Helper
-                helper = tf.contrib.seq2seq.TrainingHelper(
+                helper = helper_utils.TrainingHelper(
                     decoder_emb_inp, iterator.target_sequence_length,
                     time_major=self.time_major)
 

@@ -113,6 +113,7 @@ def get_iterator(src_dataset,
     src_tgt_dataset = src_tgt_dataset.shuffle(
             output_buffer_size, random_seed, reshuffle_each_iteration)
 
+    # Split to token?
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt: (
             tf.string_split([src]).values, tf.string_split([tgt]).values),
@@ -130,6 +131,7 @@ def get_iterator(src_dataset,
         src_tgt_dataset = src_tgt_dataset.map(
             lambda src, tgt: (src, tgt[:tgt_max_len]),
             num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+
     # Convert the word strings to ids.  Word strings that are not in the
     # vocab get the lookup table's default_value integer.
     src_tgt_dataset = src_tgt_dataset.map(
