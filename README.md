@@ -28,3 +28,13 @@ pip install opencv-python
 
 pip install tensorflow==1.8.0
 ```
+
+## Models
+
+Baseline model (Bahdanau attention model)
+
+![Attention model](miscelanous/attention.png)
+
+Improved model (Attention with feedback loop)
+
+![Attention model](miscelanous/attention_image.png)

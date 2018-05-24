@@ -305,7 +305,3 @@ if __name__ == '__main__':
                 src_placeholder,
                 batch_size_placeholder,
                 eval_line_to_video)
-
-        # score = _neighbor(eval_tgt_file, os.path.join('temp', 'output_dev'), 
-        #       eval_line_to_video)
-        # print (score)
