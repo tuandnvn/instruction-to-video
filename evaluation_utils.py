@@ -125,3 +125,33 @@ def shortest_neighbor_score ( refs,  preds, video_file ):
     # print (score_2)
     # print ('%.3f' % (total_val / total_count))
     return total_val / total_count, len(score_1), len(score_2)
+
+def video_to_features (video_path):
+    """
+    Load a video file, rastering it into a sequence of feature vectors
+    There might be different way to extracting features from each frame
+    The easiest approach might be to ignore the color from the video, and just
+    return an array of size 1
+    """
+    cap = cv2.VideoCapture(video_path)
+
+    counter = 0
+    
+    frames = []
+    
+    while (cap.isOpened()):
+        ret, frame = cap.read()
+
+        if not ret:
+            break
+            
+        small_frame = crop_and_resize ( frame )
+        
+        small_frame = np.sum ( small_frame, axis = 2 )
+        
+        t = (small_frame < ( 255+255+250-20 ) ) .astype(int)
+        
+        frames.append(t.flatten())
+        
+    return np.stack(frames)
+    

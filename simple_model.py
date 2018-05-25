@@ -65,9 +65,9 @@ def create_standard_hparams():
       num_buckets=2,
       max_train=0,
       src_max_len=100,
-      tgt_max_len=20,
+      tgt_max_len=25,
       src_max_len_infer=100,
-      tgt_max_len_infer=20,
+      tgt_max_len_infer=25,
 
       # Data format
       sos="<s>",
@@ -98,6 +98,7 @@ def create_standard_hparams():
       infer_batch_size=16,
       sampling_temperature=0.0,
       num_translations_per_input=1,
+      visual_size = 225,
   )
 
 def create_attention_mechanism(attention_option, num_units, memory,
@@ -605,13 +606,23 @@ class SimpleAttentionModel( object ):
                                             model_helper.get_device_str(
                                                 num_layers - 1, self.num_gpus))
 
+        decoder_initial_state = self._create_decoder_initial_state(cell, hparams, 
+            batch_size, encoder_state)
+
+        return cell, decoder_initial_state
+
+    def _create_decoder_initial_state(self, cell, hparams, batch_size, encoder_state):
+        """
+        batch_size depends on the beam_width
+        """
         if hparams.pass_hidden_state:
             decoder_initial_state = cell.zero_state(batch_size, dtype).clone(
               cell_state=encoder_state)
         else:
             decoder_initial_state = cell.zero_state(batch_size, dtype)
 
-        return cell, decoder_initial_state
+        return decoder_initial_state
+
 
     ##############################  Helper methods  ###############################
 

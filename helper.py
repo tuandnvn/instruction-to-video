@@ -115,7 +115,7 @@ class ControllerGreedyEmbeddingHelper(Helper):
     """
 
     def __init__(self, embedding, start_tokens, end_token, 
-                                        visual_inputs, visual_input_function):
+                                        visual_input, visual_input_function):
         """Initializer.
         Args:
             embedding: A callable that takes a vector tensor of `ids` (argmax ids),
@@ -123,8 +123,8 @@ class ControllerGreedyEmbeddingHelper(Helper):
                 will be passed to the decoder input.
             start_tokens: `int32` vector shaped `[batch_size]`, the start tokens.
             end_token: `int32` scalar, the token that marks end of decoding.
-            visual_inputs: A structure of input tensors
-            visual_input_function: 
+            visual_input: A numpy array of size = visual_size
+            visual_input_function: visual_input x action
         Raises:
             ValueError: if `start_tokens` is not a 1D tensor or `end_token` is not a
                 scalar.
