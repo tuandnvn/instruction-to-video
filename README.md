@@ -33,7 +33,7 @@ pip install tensorflow==1.8.0
 
 Baseline model (Bahdanau attention model)
 
-![Attention model](miscelanous/attention.png | width=400)
+<img src="miscelanous/attention.png" width="400">
 
 Improved model (Attention with feedback loop)
 

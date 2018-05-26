@@ -108,6 +108,43 @@ class TrainingHelper(Helper):
                     lambda: nest.map_structure(read_from_ta, self._input_tas))
             return (finished, next_inputs, state)
 
+def visual_input_function ( visual_size, visual_input, action_id ):
+    """
+    visual input: is usually a flattened array from an nxn array
+    + the last two cells to store position values of the purple block
+
+    action_id : sampled from inference phase
+    """
+    size = int(np.sqrt(visual_size - 2))
+
+    flatten_pos = visual_input[-2] * size + visual_input[-1]
+
+    visual_input[flatten_pos]
+
+    action = self._embedding_fn[action_id]
+
+    def left () :
+        return 
+
+    def right () :
+        return 
+
+    def up () :
+        return 
+
+    def down () :
+        return 
+
+    def stop ():
+        return visual_input
+
+    tf.case(
+        {tf.equal(action, tf.constant('left')): left, 
+         tf.equal(action, tf.constant('right')): right,
+         tf.equal(action, tf.constant('up')): up,
+         tf.equal(action, tf.constant('down')): down},
+         default=stop, exclusive=True)
+
 class ControllerGreedyEmbeddingHelper(Helper):
     """A helper for use during inference.
     Uses the argmax of the output (treated as logits) and passes the
@@ -124,11 +161,16 @@ class ControllerGreedyEmbeddingHelper(Helper):
             start_tokens: `int32` vector shaped `[batch_size]`, the start tokens.
             end_token: `int32` scalar, the token that marks end of decoding.
             visual_input: A numpy array of size = visual_size
-            visual_input_function: visual_input x action
+                this visual_input will be a state of the helper and will be changed
+                after each inference step
+            visual_input_function: visual_input x action = visual_input
         Raises:
             ValueError: if `start_tokens` is not a 1D tensor or `end_token` is not a
                 scalar.
         """
+        self.visual_input = visual_input
+        self.visual_input_function = visual_input_function
+
         if callable(embedding):
             self._embedding_fn = embedding
         else:
@@ -145,32 +187,6 @@ class ControllerGreedyEmbeddingHelper(Helper):
         if self._end_token.get_shape().ndims != 0:
             raise ValueError("end_token must be a scalar")
         self._start_inputs = self._embedding_fn(self._start_tokens)
-
-    @property
-    def batch_size(self):
-        return self._batch_size
-
-    @property
-    def sample_ids_shape(self):
-        return tensor_shape.TensorShape([])
-
-    @property
-    def sample_ids_dtype(self):
-        return dtypes.int32
-
-    def initialize(self, name=None):
-        finished = array_ops.tile([False], [self._batch_size])
-        return (finished, self._start_inputs)
-
-    def sample(self, time, outputs, state, name=None):
-        """sample for GreedyEmbeddingHelper."""
-        del time, state  # unused by sample_fn
-        # Outputs are logits, use argmax to get the most probable id
-        if not isinstance(outputs, ops.Tensor):
-            raise TypeError("Expected outputs to be a single Tensor, got: %s" %
-                                            type(outputs))
-        sample_ids = math_ops.argmax(outputs, axis=-1, output_type=dtypes.int32)
-        return sample_ids
 
     def next_inputs(self, time, outputs, state, sample_ids, name=None):
         """next_inputs_fn for GreedyEmbeddingHelper."""
