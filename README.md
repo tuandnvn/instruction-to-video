@@ -37,4 +37,44 @@ Baseline model (Bahdanau attention model)
 
 Improved model (Attention with feedback loop)
 
-![Improved attention model](miscelanous/attention_image.png)
+<img src="miscelanous/attention_image.png" width="700">
+
+## Datasets
+
+Videos from 0 to 299 are divided into 3 directories
+
+```
+target/0/*.mp4
+target/1/*.mp4
+target/2/*.mp4
+```
+
+Annotations used for training + validating (videos 0 to 199)
+
+```
+annotation.csv
+```
+
+Annotations used for testing (videos 200 to 299)
+
+```
+annotation2.csv
+```
+
+Annotations that have been turned into TRAIN/VALIDATE/TEST
+
+Inputs:
+
+```
+data/instructions.txt
+data/eval_instructions.txt
+data/test_instructions.txt
+```
+
+Outputs
+
+```
+data/commands.txt
+data/eval_commands.txt
+data/test_commands.txt
+```

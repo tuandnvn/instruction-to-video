@@ -606,12 +606,13 @@ class SimpleAttentionModel( object ):
                                             model_helper.get_device_str(
                                                 num_layers - 1, self.num_gpus))
 
-        decoder_initial_state = self._create_decoder_initial_state(cell, hparams, 
+        decoder_initial_state = self._create_decoder_initial_state(cell, hparams, dtype,
             batch_size, encoder_state)
 
         return cell, decoder_initial_state
 
-    def _create_decoder_initial_state(self, cell, hparams, batch_size, encoder_state):
+    def _create_decoder_initial_state(self, cell, hparams, 
+                dtype, batch_size, encoder_state):
         """
         batch_size depends on the beam_width
         """

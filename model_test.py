@@ -182,8 +182,8 @@ def _neighbor(ref_file, trans_file,
         l1s.append(l1)
         l2s.append(l2)
 
-    print ('%.3f' % np.average ( l1 ))
-    print ('%.3f' % np.average ( l2 ))
+    print ('%.3f' % np.average ( l1s ))
+    print ('%.3f' % np.average ( l2s ))
 
     return np.average ( scores )
 
@@ -204,6 +204,8 @@ if __name__ == '__main__':
     train_tgt_file = os.path.join(DATA_DIR, 'commands.txt')
     eval_src_file = os.path.join(DATA_DIR, 'eval_instructions.txt')
     eval_tgt_file = os.path.join(DATA_DIR, 'eval_commands.txt')
+    test_src_file = os.path.join(DATA_DIR, 'test_instructions.txt')
+    test_tgt_file = os.path.join(DATA_DIR, 'test_commands.txt')
     src_vocab_file = os.path.join(DATA_DIR,'instructions.vocab')
     tgt_vocab_file = os.path.join(DATA_DIR,'commands.vocab')
 
@@ -212,6 +214,8 @@ if __name__ == '__main__':
     train_tgt_data = inference.load_data(train_tgt_file)
     eval_src_data = inference.load_data(eval_src_file)
     eval_tgt_data = inference.load_data(eval_tgt_file)
+    test_src_data = inference.load_data(test_src_file)
+    test_tgt_data = inference.load_data(test_tgt_file)
 
     ### Set vocab files
     src_vocab_size, src_vocab_file = vocab_utils.check_vocab(
@@ -305,3 +309,9 @@ if __name__ == '__main__':
                 src_placeholder,
                 batch_size_placeholder,
                 eval_line_to_video)
+
+        # run_external_eval(infer_model, infer_sess, infer_iterator, infer_graph,
+        #         os.path.join("model", "model-5"), hparams, test_src_data, test_tgt_file, 
+        #         src_placeholder,
+        #         batch_size_placeholder,
+        #         eval_line_to_video)
