@@ -37,7 +37,7 @@ Baseline model (Bahdanau attention model)
 
 Improved model (Attention with feedback loop)
 
-<img src="miscelanous/attention_image.png" width="700">
+<img src="miscelanous/attention_image.png" width="550">
 
 ## Datasets
 
