@@ -5,6 +5,7 @@ a maze created with structures of different shapes and colors.
 ## Task description
 
 Following is a *Maze traversal video*
+
 ![Sample video](miscelanous/sample_video.gif)
 
 Samples of instructions corresponding to that video:
@@ -21,7 +22,7 @@ move the purple block down on the right of the blue L left and between the 2 red
 
 The learning objective is: given textual inputs describing actions (*instructions*), plan actions (sequence of action steps) on the grounded visual environment to match the instruction.
 
-In training phase, a machine learning model is learned by feeding into it a parallel corpus of instructions and corresponding sequences of actions as video captures. In evaluating phase, the machine learning model is given a textual instruction and the starting configuration of visual environment (\textit{maze puzzle}), and it needs to direct a selected block to traverse the maze toward some final target. The evaluation objective is for the planned trajectory to follow as close as possible to the intended trajectory. 
+In training phase, a machine learning model is learned by feeding into it a parallel corpus of instructions and corresponding sequences of actions as video captures. In evaluating phase, the machine learning model is given a textual instruction and the starting configuration of visual environment (*maze puzzle*), and it needs to direct a selected block to traverse the maze toward some final target. The evaluation objective is for the planned trajectory to follow as close as possible to the intended trajectory. 
 
 ## Needed library
 
