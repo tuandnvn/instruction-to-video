@@ -2,12 +2,10 @@ This repository is used to store code for sequence to sequence model
 used to turn textual instructions into execution to navigate a block to traverse
 a maze created with structures of different shapes and colors.
 
-## Data
+## Task description
 
-300 videos of maze navigation are stored in target/0, target/1, target/2
+Following is a *Maze traversal video*
 ![Sample video](miscelanous/sample_video.gif)
-
-Annotation data is stored at *Maze traversal annotation.xlsx*
 
 Samples of instructions corresponding to that video:
 
@@ -20,6 +18,10 @@ move the purple block down until it is in position between the 2 red L shapes an
 
 move the purple block down on the right of the blue L left and between the 2 red Ls to the left of the purple L
 ```
+
+The learning objective is: given textual inputs describing actions (*instructions*), plan actions (sequence of action steps) on the grounded visual environment to match the instruction.
+
+In training phase, a machine learning model is learned by feeding into it a parallel corpus of instructions and corresponding sequences of actions as video captures. In evaluating phase, the machine learning model is given a textual instruction and the starting configuration of visual environment (\textit{maze puzzle}), and it needs to direct a selected block to traverse the maze toward some final target. The evaluation objective is for the planned trajectory to follow as close as possible to the intended trajectory. 
 
 ## Needed library
 
