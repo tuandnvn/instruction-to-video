@@ -126,6 +126,7 @@ def create_attention_mechanism(attention_option, num_units, memory,
             memory,
             memory_sequence_length=source_sequence_length,
             normalize=True)
+
     else:
         raise ValueError("Unknown attention option %s" % attention_option)
 
@@ -365,11 +366,13 @@ class SimpleAttentionModel(object):
         num_layers = self.num_encoder_layers
         iterator = self.iterator
 
-        source = iterator.source
+        text_source = iterator.source
         if self.time_major:
-            source = tf.transpose(source)
+            text_source = tf.transpose(text_source)
 
-        with tf.variable_scope("encoder") as scope:
+        image_source = iterator.image_source
+
+        with tf.variable_scope("text_encoder") as scope:
             dtype = scope.dtype
             # Look up embedding, emp_inp: [max_time, batch_size, num_units]
             encoder_emb_inp = tf.nn.embedding_lookup(
@@ -390,7 +393,14 @@ class SimpleAttentionModel(object):
                     time_major=self.time_major,
                     swap_memory=True)
 
-        return encoder_outputs, encoder_state
+        with tf.variable_scope("image_encoder") as scope:
+            def _build_convnet(image_source):
+                """Return image_encoder_outputs"""
+                pass
+            image_encoder_outputs = _build_convnet(image_source)
+
+
+        return encoder_outputs, encoder_state, image_encoder_outputs
 
     def _build_encoder_cell(self, hparams, num_layers,
                             base_gpu=0):
