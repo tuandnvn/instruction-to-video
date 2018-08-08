@@ -99,6 +99,9 @@ def create_standard_hparams():
       sampling_temperature=0.0,
       num_translations_per_input=1,
       visual_size = 225,
+
+      # Convolution 
+      cnn_network_file = '',
   )
 
 def create_attention_mechanism(attention_option, num_units, memory,
