@@ -6,3 +6,4 @@ notebooks/.ipynb_checkpoints
 **/~*.xlsx
 model/
 temp/
+.idea/

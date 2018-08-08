@@ -17,89 +17,92 @@ import helper as helper_utils
 A very simple HParams config 
 that allows quick testing 
 """
+
+
 def create_standard_hparams():
-  return tf.contrib.training.HParams(
-      # Data
-      src="",
-      tgt="",
-      train_prefix="",
-      dev_prefix="",
-      test_prefix="",
-      vocab_prefix="",
-      embed_prefix="",
-      out_dir="temp",
+    return tf.contrib.training.HParams(
+        # Data
+        src="",
+        tgt="",
+        train_prefix="",
+        dev_prefix="",
+        test_prefix="",
+        vocab_prefix="",
+        embed_prefix="",
+        out_dir="temp",
 
-      # Networks
-      # num_units is embedding dimension
-      # and also the cell/memory dimension
-      num_units=128,
-      num_layers=2, # not used
-      num_encoder_layers=1,
-      num_decoder_layers=1,
-      dropout=0.5,
-      unit_type="lstm",
-      encoder_type="uni", # Unidirection for simplicity
-      residual=False,
-      time_major=True,
-      num_embeddings_partitions=0,
+        # Networks
+        # num_units is embedding dimension
+        # and also the cell/memory dimension
+        num_units=128,
+        num_layers=2,  # not used
+        num_encoder_layers=1,
+        num_decoder_layers=1,
+        dropout=0.5,
+        unit_type="lstm",
+        encoder_type="uni",  # Unidirection for simplicity
+        residual=False,
+        time_major=True,
+        num_embeddings_partitions=0,
 
-      # Attention mechanisms
-      attention="bahdanau",
-      attention_architecture="standard",
-      output_attention=True,
-      pass_hidden_state=True,
+        # Attention mechanisms
+        attention="bahdanau",
+        attention_architecture="standard",
+        output_attention=True,
+        pass_hidden_state=True,
 
-      # Train
-      optimizer="sgd",
-      batch_size=64,
-      init_op="uniform",
-      init_weight=0.1,
-      learning_rate=0.2,
-      warmup_steps=0,
-      warmup_scheme="t2t",
-      decay_scheme="luong5",
-      colocate_gradients_with_ops=True,
-      num_train_steps=2000,
+        # Train
+        optimizer="sgd",
+        batch_size=64,
+        init_op="uniform",
+        init_weight=0.1,
+        learning_rate=0.2,
+        warmup_steps=0,
+        warmup_scheme="t2t",
+        decay_scheme="luong5",
+        colocate_gradients_with_ops=True,
+        num_train_steps=2000,
 
-      # Data constraints
-      num_buckets=2,
-      max_train=0,
-      src_max_len=100,
-      tgt_max_len=25,
-      src_max_len_infer=100,
-      tgt_max_len_infer=25,
+        # Data constraints
+        num_buckets=2,
+        max_train=0,
+        src_max_len=100,
+        tgt_max_len=25,
+        src_max_len_infer=100,
+        tgt_max_len_infer=25,
 
-      # Data format
-      sos="<s>",
-      eos="</s>",
-      subword_option="",
-      check_special_token=True,
+        # Data format
+        sos="<s>",
+        eos="</s>",
+        subword_option="",
+        check_special_token=True,
 
-      # Misc
-      forget_bias=1.0,
-      num_gpus=0,
-      epoch_step=0,  # record where we were within an epoch.
-      steps_per_stats=50,
-      steps_per_eval=200,
-      steps_per_external_eval=500,
-      share_vocab=False,
-      metrics=["neighbor"],
-      log_device_placement=False,
-      random_seed=None,
-      # only enable beam search during inference when beam_width > 0.
-      beam_width=2,
-      length_penalty_weight=0.0,
-      override_loaded_hparams=True,
-      num_keep_ckpts=4,
-      avg_ckpts=False,
+        # Misc
+        forget_bias=1.0,
+        num_gpus=0,
+        epoch_step=0,  # record where we were within an epoch.
+        steps_per_stats=50,
+        steps_per_eval=200,
+        steps_per_external_eval=500,
+        share_vocab=False,
+        metrics=["neighbor"],
+        log_device_placement=False,
+        random_seed=None,
+        # only enable beam search during inference when beam_width > 0.
+        beam_width=2,
+        length_penalty_weight=0.0,
+        override_loaded_hparams=True,
+        num_keep_ckpts=4,
+        avg_ckpts=False,
 
-      # For inference
-      inference_indices=None,
-      infer_batch_size=16,
-      sampling_temperature=0.0,
-      num_translations_per_input=1,
-      visual_size = 225,
-  )
+        # For inference
+        inference_indices=None,
+        infer_batch_size=16,
+        sampling_temperature=0.0,
+        num_translations_per_input=1,
+        visual_size=225,
+    )
+
 
 def create_attention_mechanism(attention_option, num_units, memory,
                                source_sequence_length, mode):
@@ -128,7 +131,8 @@ def create_attention_mechanism(attention_option, num_units, memory,
 
     return attention_mechanism
 
-class SimpleAttentionModel( object ):
+
+class SimpleAttentionModel(object):
     """
     This class is just a monolithic class that 
     I copied from the NMT code so that we have an overview of
@@ -142,15 +146,16 @@ class SimpleAttentionModel( object ):
     is because it is not a full translation model, and biased to run
     from left to right.
     """
+
     def __init__(self,
-               hparams,
-               mode,
-               iterator,
-               source_vocab_table,
-               target_vocab_table,
-               reverse_target_vocab_table=None,
-               scope=None,
-               extra_args=None):
+                 hparams,
+                 mode,
+                 iterator,
+                 source_vocab_table,
+                 target_vocab_table,
+                 reverse_target_vocab_table=None,
+                 scope=None,
+                 extra_args=None):
         """Create the model.
 
         Args:
@@ -177,7 +182,6 @@ class SimpleAttentionModel( object ):
         self.num_gpus = hparams.num_gpus
         self.time_major = hparams.time_major
 
-
         self.single_cell_fn = None
 
         # Set num layers
@@ -201,7 +205,6 @@ class SimpleAttentionModel( object ):
                 self.output_layer = Dense(
                     hparams.tgt_vocab_size, use_bias=False, name="output_projection")
 
-
         # Build graph
         utils.print_out("# creating %s graph ..." % self.mode)
         dtype = tf.float32
@@ -214,7 +217,7 @@ class SimpleAttentionModel( object ):
 
             ## Decoder
             logits, sample_id, final_context_state = self._build_decoder(
-              encoder_outputs, encoder_state, hparams)
+                encoder_outputs, encoder_state, hparams)
 
             ## Loss
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
@@ -227,14 +230,14 @@ class SimpleAttentionModel( object ):
         elif self.mode == tf.contrib.learn.ModeKeys.EVAL:
             self.eval_loss = loss
         elif self.mode == tf.contrib.learn.ModeKeys.INFER:
-            self.final_context_state =  final_context_state
+            self.final_context_state = final_context_state
             self.sample_words = reverse_target_vocab_table.lookup(
-              tf.to_int64(sample_id))
+                tf.to_int64(sample_id))
 
         if self.mode != tf.contrib.learn.ModeKeys.INFER:
             ## Count the number of predicted words for compute ppl.
             self.predict_count = tf.reduce_sum(
-              self.iterator.target_sequence_length)
+                self.iterator.target_sequence_length)
 
         self.global_step = tf.Variable(0, trainable=False)
         params = tf.trainable_variables()
@@ -264,7 +267,7 @@ class SimpleAttentionModel( object ):
             clipped_grads, grad_norm = tf.clip_by_global_norm(gradients, 5)
 
             self.update = opt.apply_gradients(
-              zip(clipped_grads, params), global_step=self.global_step)
+                zip(clipped_grads, params), global_step=self.global_step)
 
             # Summary
             self.train_summary = tf.summary.merge([
@@ -283,9 +286,8 @@ class SimpleAttentionModel( object ):
         utils.print_out("# Trainable variables")
         for param in params:
             utils.print_out("  %s, %s, %s" % (param.name, str(param.get_shape()),
-                                        param.op.device))
+                                              param.op.device))
 
-    
     ##############################  Public methods  ###############################
 
     def train(self, sess):
@@ -328,7 +330,7 @@ class SimpleAttentionModel( object ):
         if self.time_major:
             sample_words = sample_words.transpose()
         elif sample_words.ndim == 3:  # beam search output in [batch_size,
-                                      # time, beam_width] shape.
+            # time, beam_width] shape.
             sample_words = sample_words.transpose([2, 0, 1])
         return sample_words, infer_summary
 
@@ -340,7 +342,7 @@ class SimpleAttentionModel( object ):
     def _compute_loss(self, logits):
         """Compute optimization loss."""
         target_output = self.iterator.target_output
-        
+
         if self.time_major:
             target_output = tf.transpose(target_output)
 
@@ -349,7 +351,7 @@ class SimpleAttentionModel( object ):
             labels=target_output, logits=logits)
         target_weights = tf.sequence_mask(
             self.iterator.target_sequence_length, max_time, dtype=logits.dtype)
-        
+
         if self.time_major:
             target_weights = tf.transpose(target_weights)
 
@@ -387,11 +389,11 @@ class SimpleAttentionModel( object ):
                     sequence_length=iterator.source_sequence_length,
                     time_major=self.time_major,
                     swap_memory=True)
-          
+
         return encoder_outputs, encoder_state
 
     def _build_encoder_cell(self, hparams, num_layers,
-                              base_gpu=0):
+                            base_gpu=0):
         """Build a multi-layer RNN cell that can be used by encoder."""
 
         return model_helper.create_rnn_cell(
@@ -421,7 +423,7 @@ class SimpleAttentionModel( object ):
 
         ### Start and end of sequence 
         tgt_sos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.sos)),
-                         tf.int32)
+                             tf.int32)
         tgt_eos_id = tf.cast(self.tgt_vocab_table.lookup(tf.constant(hparams.eos)),
                              tf.int32)
         iterator = self.iterator
@@ -435,8 +437,8 @@ class SimpleAttentionModel( object ):
             # This is different from encoder-decoder framework
             # in which state of encoder is passed into decoder
             cell, decoder_initial_state = self._build_decoder_cell(
-              hparams, encoder_outputs, encoder_state,
-              iterator.source_sequence_length)
+                hparams, encoder_outputs, encoder_state,
+                iterator.source_sequence_length)
 
             ## Train or eval
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
@@ -458,7 +460,7 @@ class SimpleAttentionModel( object ):
                 my_decoder = tf.contrib.seq2seq.BasicDecoder(
                     cell,
                     helper,
-                    decoder_initial_state,)
+                    decoder_initial_state, )
 
                 # Dynamic decoding
                 outputs, final_context_state, _ = tf.contrib.seq2seq.dynamic_decode(
@@ -543,16 +545,15 @@ class SimpleAttentionModel( object ):
 
         return logits, sample_id, final_context_state
 
-
     def _build_decoder_cell(self, hparams, encoder_outputs, encoder_state,
-                          source_sequence_length):
+                            source_sequence_length):
         """Build a RNN cell with attention mechanism that can be used by decoder."""
         attention_option = hparams.attention
         attention_architecture = hparams.attention_architecture
 
         if attention_architecture != "standard":
             raise ValueError(
-              "Unknown attention architecture %s" % attention_architecture)
+                "Unknown attention architecture %s" % attention_architecture)
 
         num_units = hparams.num_units
         num_layers = self.num_decoder_layers
@@ -568,11 +569,11 @@ class SimpleAttentionModel( object ):
 
         if self.mode == tf.contrib.learn.ModeKeys.INFER and beam_width > 0:
             memory = tf.contrib.seq2seq.tile_batch(
-              memory, multiplier=beam_width)
+                memory, multiplier=beam_width)
             source_sequence_length = tf.contrib.seq2seq.tile_batch(
-              source_sequence_length, multiplier=beam_width)
+                source_sequence_length, multiplier=beam_width)
             encoder_state = tf.contrib.seq2seq.tile_batch(
-              encoder_state, multiplier=beam_width)
+                encoder_state, multiplier=beam_width)
             batch_size = self.batch_size * beam_width
         else:
             batch_size = self.batch_size
@@ -607,23 +608,22 @@ class SimpleAttentionModel( object ):
                                                 num_layers - 1, self.num_gpus))
 
         decoder_initial_state = self._create_decoder_initial_state(cell, hparams, dtype,
-            batch_size, encoder_state)
+                                                                   batch_size, encoder_state)
 
         return cell, decoder_initial_state
 
-    def _create_decoder_initial_state(self, cell, hparams, 
-                dtype, batch_size, encoder_state):
+    def _create_decoder_initial_state(self, cell, hparams,
+                                      dtype, batch_size, encoder_state):
         """
         batch_size depends on the beam_width
         """
         if hparams.pass_hidden_state:
             decoder_initial_state = cell.zero_state(batch_size, dtype).clone(
-              cell_state=encoder_state)
+                cell_state=encoder_state)
         else:
             decoder_initial_state = cell.zero_state(batch_size, dtype)
 
         return decoder_initial_state
-
 
     ##############################  Helper methods  ###############################
 
@@ -649,7 +649,7 @@ class SimpleAttentionModel( object ):
                 src_embed_file=hparams.src_embed_file,
                 tgt_embed_file=hparams.tgt_embed_file,
                 num_gpus=hparams.num_gpus,
-                scope=scope,))
+                scope=scope, ))
 
     def _get_learning_rate_warmup(self, hparams):
         """Get learning rate warmup."""
@@ -665,8 +665,8 @@ class SimpleAttentionModel( object ):
         if warmup_scheme == "t2t":
             # 0.01^(1/warmup_steps): we start with a lr, 100 times smaller
             warmup_factor = tf.exp(tf.log(0.01) / warmup_steps)
-            inv_decay = warmup_factor**(
-              tf.to_float(warmup_steps - self.global_step))
+            inv_decay = warmup_factor ** (
+                tf.to_float(warmup_steps - self.global_step))
         else:
             raise ValueError("Unknown warmup scheme %s" % warmup_scheme)
 
@@ -697,7 +697,6 @@ class SimpleAttentionModel( object ):
             decay_factor = 1.0
         elif hparams.decay_scheme:
             raise ValueError("Unknown decay scheme %s" % hparams.decay_scheme)
-        
 
         utils.print_out("  decay_scheme=%s, start_decay_step=%d, decay_steps %d, "
                         "decay_factor %g" % (hparams.decay_scheme,
@@ -714,11 +713,13 @@ class SimpleAttentionModel( object ):
                 decay_steps, decay_factor, staircase=True),
             name="learning_rate_decay_cond")
 
+
 ###################### Stats functions ########################
 
 def init_stats():
-  """Initialize statistics that we want to accumulate."""
-  return {"step_time": 0.0, "loss": 0.0, "predict_count": 0.0 }
+    """Initialize statistics that we want to accumulate."""
+    return {"step_time": 0.0, "loss": 0.0, "predict_count": 0.0}
+
 
 def update_stats(stats, start_time, step_result):
     """Update stats: write summary and accumulate statistics."""
@@ -733,7 +734,7 @@ def update_stats(stats, start_time, step_result):
 
 
 def run_internal_eval(eval_model, eval_sess, eval_iterator, eval_graph,
-                model_dir, hparams, skip_count_placeholder):
+                      model_dir, hparams, skip_count_placeholder):
     """
     Compute internal evaluation (perplexity) for both dev / test.
 
@@ -749,10 +750,11 @@ def run_internal_eval(eval_model, eval_sess, eval_iterator, eval_graph,
 
     """Computing perplexity."""
     eval_sess.run(eval_iterator.initializer,
-            feed_dict={skip_count_placeholder: 0})
+                  feed_dict={skip_count_placeholder: 0})
     dev_ppl = model_helper.compute_perplexity(loaded_eval_model, eval_sess, "dev")
 
     return dev_ppl
+
 
 if __name__ == '__main__':
     hparams = create_standard_hparams()
@@ -766,8 +768,8 @@ if __name__ == '__main__':
     # Separate maze problems
     test_src_file = os.path.join(DATA_DIR, 'test_instructions.txt')
     test_tgt_file = os.path.join(DATA_DIR, 'test_commands.txt')
-    src_vocab_file = os.path.join(DATA_DIR,'instructions.vocab')
-    tgt_vocab_file = os.path.join(DATA_DIR,'commands.vocab')
+    src_vocab_file = os.path.join(DATA_DIR, 'instructions.vocab')
+    tgt_vocab_file = os.path.join(DATA_DIR, 'commands.vocab')
 
     ### Set vocab files
     src_vocab_size, src_vocab_file = vocab_utils.check_vocab(
@@ -789,7 +791,7 @@ if __name__ == '__main__':
     hparams.add_hparam("src_vocab_file", src_vocab_file)
     hparams.add_hparam("tgt_vocab_file", tgt_vocab_file)
 
-    print ('src_vocab_size = %d, tgt_vocab_size = %d' % (src_vocab_size, tgt_vocab_size) )
+    print('src_vocab_size = %d, tgt_vocab_size = %d' % (src_vocab_size, tgt_vocab_size))
 
     # There are no pretrained embeddings:
     hparams.add_hparam("src_embed_file", "")
@@ -810,7 +812,7 @@ if __name__ == '__main__':
 
         src_dataset = tf.data.TextLineDataset(src_file)
         tgt_dataset = tf.data.TextLineDataset(tgt_file)
-        
+
         skip_count_placeholder = tf.placeholder(shape=(), dtype=tf.int64)
 
         # Create iterator
@@ -835,7 +837,7 @@ if __name__ == '__main__':
             mode=tf.contrib.learn.ModeKeys.TRAIN,
             source_vocab_table=src_vocab_table,
             target_vocab_table=tgt_vocab_table)
-    
+
     with eval_graph.as_default(), tf.container("eval"):
         src_vocab_table, tgt_vocab_table = vocab_utils.create_vocab_tables(
             src_vocab_file, tgt_vocab_file, hparams.share_vocab)
@@ -866,9 +868,8 @@ if __name__ == '__main__':
             source_vocab_table=src_vocab_table,
             target_vocab_table=tgt_vocab_table)
 
-
-    train_sess = tf.Session( graph = graph )
-    eval_sess = tf.Session( graph = eval_graph )
+    train_sess = tf.Session(graph=graph)
+    eval_sess = tf.Session(graph=eval_graph)
 
     with graph.as_default():
         loaded_train_model, global_step = model_helper.create_or_load_model(
@@ -881,7 +882,7 @@ if __name__ == '__main__':
     utils.print_out("# Init train iterator, skipping %d elements" % skip_count)
 
     train_sess.run(iterator.initializer,
-        feed_dict={skip_count_placeholder: skip_count})
+                   feed_dict={skip_count_placeholder: skip_count})
 
     last_stats_step = global_step
     last_eval_step = global_step
@@ -905,11 +906,11 @@ if __name__ == '__main__':
             hparams.epoch_step = 0
 
             utils.print_out(
-                  "# Finished an epoch, step %d." %
-                  global_step)
+                "# Finished an epoch, step %d." %
+                global_step)
 
             train_sess.run(iterator.initializer,
-                feed_dict={skip_count_placeholder: 0})
+                           feed_dict={skip_count_placeholder: 0})
 
             continue
 
@@ -937,9 +938,9 @@ if __name__ == '__main__':
 
             # Save checkpoint
             loaded_train_model.saver.save(
-              train_sess,
-              os.path.join("model", "translate.ckpt"),
-              global_step=global_step)
+                train_sess,
+                os.path.join("model", "translate.ckpt"),
+                global_step=global_step)
 
             # Load checkpoint into eval_model
             # and run evaluation over eval data
@@ -952,13 +953,13 @@ if __name__ == '__main__':
 
     # Done training
     loaded_train_model.saver.save(
-          train_sess,
-          os.path.join("model", "translate.ckpt"),
-          global_step=global_step)
+        train_sess,
+        os.path.join("model", "translate.ckpt"),
+        global_step=global_step)
 
     utils.print_time("# Done training!", start_train_time)
 
-    print ('train_ppls')
-    print (train_ppls)
-    print ('dev_ppls')
-    print (dev_ppls)
+    print('train_ppls')
+    print(train_ppls)
+    print('dev_ppls')
+    print(dev_ppls)
