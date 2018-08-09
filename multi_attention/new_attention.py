@@ -611,7 +611,7 @@ class AttentionWrapperState(
             super(AttentionWrapperState, self)._replace(**kwargs))
 
 
-def _compute_attention(text_attention_mechanism, image_attention_mechanism,
+def _compute_multi_attention(text_attention_mechanism, image_attention_mechanism,
                        cell_output, attention_state, attention_layer):
     """Computes the attention and alignments for given attention_mechanisms."""
 
@@ -1027,7 +1027,7 @@ class MultiAttentionWrapper(rnn_cell_impl.RNNCell):
         maybe_all_histories = []
         for i, attention_mechanism in enumerate(self._text_attention_mechanisms):
             # it could be a tuple with only one element
-            attention, alignments, next_attention_state = _compute_attention(
+            attention, alignments, next_attention_state = _compute_multi_attention(
                 attention_mechanism, self._image_attention_mechanism,
                 cell_output, previous_attention_state[i],
                 self._attention_layers[i] if self._attention_layers else None)
