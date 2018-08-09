@@ -652,7 +652,7 @@ def _compute_attention(text_attention_mechanism, image_attention_mechanism,
     return attention, text_alignments, next_attention_state
 
 
-class AttentionWrapper(rnn_cell_impl.RNNCell):
+class MultiAttentionWrapper(rnn_cell_impl.RNNCell):
     """Wraps another `RNNCell` with attention.
     """
 

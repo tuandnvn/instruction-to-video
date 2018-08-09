@@ -13,6 +13,8 @@ from nmt.utils import misc_utils as utils
 from tensorflow.python.layers.core import Dense
 import helper as helper_utils
 
+from multi_attention.new_attention import TextAttention, ImageAttention, MultiAttentionWrapper
+
 """
 A very simple HParams config 
 that allows quick testing 
@@ -126,7 +128,12 @@ def create_attention_mechanism(attention_option, num_units, memory,
             memory,
             memory_sequence_length=source_sequence_length,
             normalize=True)
-
+    elif attention_option == "_text":
+        attention_mechanism = TextAttention(
+            num_units, memory, memory_sequence_length=source_sequence_length)
+    elif attention_option == "_image":
+        attention_mechanism = ImageAttention(
+            num_units, memory, memory_sequence_length=source_sequence_length)
     else:
         raise ValueError("Unknown attention option %s" % attention_option)
 
@@ -418,12 +425,12 @@ class SimpleAttentionModel(object):
             base_gpu=base_gpu,
             single_cell_fn=self.single_cell_fn)
 
-    def _build_decoder(self, encoder_outputs, encoder_state, hparams):
+    def _build_decoder(self, text_encoder_outputs, text_encoder_state, hparams, image_encoder_outputs=None):
         """Build and run a RNN decoder with a final projection layer.
 
         Args:
-          encoder_outputs: The outputs of encoder for every time step.
-          encoder_state: The final state of the encoder.
+          text_encoder_outputs: The outputs of encoder for every time step.
+          text_encoder_state: The final state of the encoder.
           hparams: The Hyperparameters configurations.
 
         Returns:
@@ -446,9 +453,14 @@ class SimpleAttentionModel(object):
             # decoder_initial_state is basically zeros
             # This is different from encoder-decoder framework
             # in which state of encoder is passed into decoder
-            cell, decoder_initial_state = self._build_decoder_cell(
-                hparams, encoder_outputs, encoder_state,
-                iterator.source_sequence_length)
+            if hparams.attention == "multi_attention" and image_encoder_outputs is not None:
+                cell, decoder_initial_state = self._build_new_decoder_cell(
+                    hparams, text_encoder_outputs, image_encoder_outputs,
+                    text_encoder_state, iterator.source_sequence_length)
+            else:
+                cell, decoder_initial_state = self._build_decoder_cell(
+                    hparams, text_encoder_outputs, text_encoder_state,
+                    iterator.source_sequence_length)
 
             ## Train or eval
             if self.mode != tf.contrib.learn.ModeKeys.INFER:
@@ -554,6 +566,86 @@ class SimpleAttentionModel(object):
                     sample_id = outputs.sample_id
 
         return logits, sample_id, final_context_state
+
+    def _build_new_decoder_cell(self, hparams, text_encoder_outputs, text_encoder_state,
+                            image_encoder_outputs, source_sequence_length):
+        """Build a RNN cell with multi-attention mechanism that can be used by decoder."""
+        attention_option = ['_text', '_image']
+        attention_architecture = hparams.attention_architecture
+
+        if attention_architecture != "standard":
+            raise ValueError(
+                "Unknown attention architecture %s" % attention_architecture)
+
+        if image_encoder_outputs is None:
+            raise ValueError(
+                "Image encoder outputs cannot be none!")
+
+        num_units = hparams.num_units
+        num_layers = self.num_decoder_layers
+        beam_width = hparams.beam_width
+
+        dtype = tf.float32
+
+        # Ensure text_memory is batch-major
+        if self.time_major:
+            text_memory = tf.transpose(text_encoder_outputs, [1, 0, 2])
+            image_memory = tf.transpose(image_encoder_outputs, [1, 0, 2])
+
+        else:
+            text_memory = text_encoder_outputs
+            image_memory = image_encoder_outputs
+
+        if self.mode == tf.contrib.learn.ModeKeys.INFER and beam_width > 0:
+            text_memory = tf.contrib.seq2seq.tile_batch(
+                text_memory, multiplier=beam_width)
+            image_memory = tf.contrib.seq2seq.tile_batch(
+                image_memory, multiplier=beam_width)
+            source_sequence_length = tf.contrib.seq2seq.tile_batch(
+                source_sequence_length, multiplier=beam_width)
+            text_encoder_state = tf.contrib.seq2seq.tile_batch(
+                text_encoder_state, multiplier=beam_width)
+            batch_size = self.batch_size * beam_width
+        else:
+            batch_size = self.batch_size
+
+        text_attention_mechanism = self.attention_mechanism_fn(
+            attention_option[0], num_units, text_memory, source_sequence_length, self.mode)
+        image_attention_mechanism = self.attention_mechanism_fn(
+            attention_option[1], num_units, image_memory, source_sequence_length, self.mode)
+
+        cell = model_helper.create_rnn_cell(
+            unit_type=hparams.unit_type,
+            num_units=num_units,
+            num_layers=num_layers,
+            num_residual_layers=0,
+            forget_bias=hparams.forget_bias,
+            dropout=hparams.dropout,
+            num_gpus=self.num_gpus,
+            mode=self.mode,
+            single_cell_fn=self.single_cell_fn)
+
+        # Only generate alignment in greedy INFER mode.
+        alignment_history = (self.mode == tf.contrib.learn.ModeKeys.INFER and
+                             beam_width == 0)
+        cell = MultiAttentionWrapper(
+            cell,
+            text_attention_mechanism=text_attention_mechanism,
+            image_attention_mechanism=image_attention_mechanism,
+            attention_layer_size=num_units,
+            alignment_history=alignment_history,
+            output_attention=hparams.output_attention,
+            name="attention")
+
+        cell = tf.contrib.rnn.DeviceWrapper(cell,
+                                            model_helper.get_device_str(
+                                                num_layers - 1, self.num_gpus))
+
+        # TODO: maybe we can use both the text and image encoder stats as decoder initial hidden state
+        decoder_initial_state = self._create_decoder_initial_state(cell, hparams, dtype,
+                                                                   batch_size, text_encoder_state)
+
+        return cell, decoder_initial_state
 
     def _build_decoder_cell(self, hparams, encoder_outputs, encoder_state,
                             source_sequence_length):
