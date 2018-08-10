@@ -108,10 +108,10 @@ class TrainingHelper(Helper):
                     lambda: nest.map_structure(read_from_ta, self._input_tas))
             return (finished, next_inputs, state)
 
-def visual_input_function ( visual_size, visual_input, action_id ):
+def visual_input_function ( visual_input, pos, action_id ):
     """
-    visual input: is usually a flattened array from an nxn array
-    + the last two cells to store position values of the purple block
+    visual input: is an nxn array
+    pos: 
 
     action_id : sampled from inference phase
     """
@@ -138,12 +138,12 @@ def visual_input_function ( visual_size, visual_input, action_id ):
     def stop ():
         return visual_input
 
-    tf.case(
-        {tf.equal(action, tf.constant('left')): left, 
-         tf.equal(action, tf.constant('right')): right,
-         tf.equal(action, tf.constant('up')): up,
-         tf.equal(action, tf.constant('down')): down},
-         default=stop, exclusive=True)
+    return tf.case(
+        {tf.equal(action, tf.constant('left')): left(), 
+         tf.equal(action, tf.constant('right')): right(),
+         tf.equal(action, tf.constant('up')): up(),
+         tf.equal(action, tf.constant('down')): down()},
+         default=stop(), exclusive=True)
 
 class ControllerGreedyEmbeddingHelper(Helper):
     """A helper for use during inference.
@@ -163,7 +163,7 @@ class ControllerGreedyEmbeddingHelper(Helper):
             visual_input: A numpy array of size = visual_size
                 this visual_input will be a state of the helper and will be changed
                 after each inference step
-            visual_input_function: visual_input x action = visual_input
+            visual_input_function: visual_input x action-> visual_input
         Raises:
             ValueError: if `start_tokens` is not a 1D tensor or `end_token` is not a
                 scalar.

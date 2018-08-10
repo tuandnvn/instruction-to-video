@@ -38,8 +38,8 @@ class BatchedInput(
 
 class VisualBatchedInput (
         collections.namedtuple("VisualBatchedInput",
-                             ("initializer", "source", "target_input", 
-                                "target_output", "target_visual", 
+                             ("initializer", "source", "visual_source", "target_input", 
+                                "target_output", "visual_target", 
                                 "source_sequence_length",
                                 "target_sequence_length"))):
     pass
@@ -229,6 +229,47 @@ def get_iterator(src_dataset,
         source_sequence_length=src_seq_len,
         target_sequence_length=tgt_seq_len)
 
+def video_to_features (video_path):
+    """
+    Load a video file, rastering it into a sequence of feature vectors
+    There might be different way to extracting features from each frame
+    The easiest approach might be to ignore the color from the video, and just
+    return an array of size 1
+    """
+    cap = cv2.VideoCapture(video_path)
+
+    counter = 0
+    
+    frames = []
+    
+    while (cap.isOpened()):
+        ret, frame = cap.read()
+
+        if not ret:
+            break
+            
+        small_frame = crop_and_resize ( frame )
+        
+        small_frame = np.sum ( small_frame, axis = 2 )
+        
+        t = (small_frame < ( 255+255+250-20 ) ) .astype(int)
+        
+        frames.append(t.flatten())
+        
+    return np.stack(frames)
+    
+def video_to_first_frame( video_file ):
+    """
+    Return the first frame of the video file as a matrix
+    of size ()
+    """
+    pass
+
+def video_to_all_frames ( video_file ):
+    """
+    Return all frames as a tensor 
+    """
+    pass
 
 def get_visual_iterator(src_dataset,
                      tgt_dataset,
@@ -248,7 +289,8 @@ def get_visual_iterator(src_dataset,
                      num_shards=1,
                      shard_index=0,
                      reshuffle_each_iteration=True,
-                     visual_size = 225):
+                     visual_size = (15,15),
+                     video_to_features=None):
 
     """
     visual_dataset: list of string, one string for one filename
@@ -368,6 +410,6 @@ def get_visual_iterator(src_dataset,
         source=src_ids,
         target_input=tgt_input_ids,
         target_output=tgt_output_ids,
-        target_visual = tgt_vis,
+        visual_target = tgt_vis,
         source_sequence_length=src_seq_len,
         target_sequence_length=tgt_seq_len)
