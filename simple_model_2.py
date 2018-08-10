@@ -48,7 +48,7 @@ def create_standard_hparams():
         num_embeddings_partitions=0,
 
         # Attention mechanisms
-        attention="bahdanau",
+        attention="multi_attention",
         attention_architecture="standard",
         output_attention=True,
         pass_hidden_state=True,
@@ -429,7 +429,8 @@ class SimpleAttentionModel(object):
         """Build and run a RNN decoder with a final projection layer.
 
         Args:
-          text_encoder_outputs: The outputs of encoder for every time step.
+          text_encoder_outputs: The outputs of text encoder for every time step.
+          image_encoder_outputs: The outputs of image encoder for every time step.
           text_encoder_state: The final state of the encoder.
           hparams: The Hyperparameters configurations.
 
@@ -609,6 +610,7 @@ class SimpleAttentionModel(object):
         else:
             batch_size = self.batch_size
 
+        # We assume the num_units for both attention mechanism is the same
         text_attention_mechanism = self.attention_mechanism_fn(
             attention_option[0], num_units, text_memory, source_sequence_length, self.mode)
         image_attention_mechanism = self.attention_mechanism_fn(

@@ -315,48 +315,46 @@ def _luong_text_score(query, keys, scale):
             initializer=init_ops.ones_initializer, shape=())
         score = g * score
     # un-normalized score (textual associated energy)
-    # shape: [batch_size, 1, max_time] (max_time of text encoder)
+    # shape: [batch_size, max_time] (max_time of text encoder)
     return score
 
 
-def _luong_image_score(text_context, image_keys, scale):
+def _luong_image_score(text_alignments, text_keys, image_keys, scale):
     """Implements Luong-style (multiplicative) scoring function for image encoder.
 
     Args:
-      text_context: Tensor, shape `[batch_size, memory_size]`.
-      image_keys: Processed image memory, shape `[batch_size, max_time, num_units]`.
+      text_alignments: Tensor, shape `[batch_size, text_max_time]`
+      text_keys: Tensor, shape `[batch_size, text_max_time, text_num_units]`.
+      image_keys: Processed image memory, shape `[batch_size, image_max_time, image_num_units]`.
       scale: Whether to apply a scale to the score function.
 
     Returns:
-      A `[batch_size, max_time]` tensor of un-normalized score values.
+      A `[batch_size, image_max_time]` tensor of un-normalized score values.
 
     Raises:
       ValueError: If `image_keys` and `text_context` depths do not match.
     """
-    memory_units = text_context.get_shape()[-1]
-    key_units = image_keys.get_shape()[-1]
-    if memory_units != key_units:
+    batch_size = text_keys.get_shape()[0]
+    text_num_units = text_keys.get_shape()[-1]
+    image_num_units = image_keys.get_shape()[-1]
+    if text_num_units != image_num_units:
         raise ValueError(
             "Incompatible or unknown inner dimensions between query and keys.  "
             "Query (%s) has units: %s.  Keys (%s) have units: %s.  "
             "Perhaps you need to set num_units to the keys' dimension (%s)?"
-            % (text_context, memory_units, image_keys, key_units, key_units))
-    dtype = text_context.dtype
+            % (text_keys, text_num_units, image_keys, image_num_units, image_num_units))
+    dtype = image_keys.dtype
 
-    # Reshape from [batch_size, memory_units] to [batch_size, 1, memory_units]
+    # trainable weight
+    W_b = variable_scope.get_variable(
+        "attention_W_b", [batch_size, text_num_units, image_num_units], dtype=dtype)
+    # shape: [batch_size, text_max_time, image_max_time] (grounding energy)
+    grounding_score = math_ops.matmul(math_ops.matmul(text_keys, W_b), image_keys, transpose_b=True)
+
+    # Reshape from [batch_size, text_max_time] to [batch_size, 1, text_max_time]
     # for matmul.
-    text_context = array_ops.expand_dims(text_context, 1)
-
-    # Inner product along the query units dimension.
-    # matmul shapes: query is [batch_size, 1, depth] and
-    #                keys is [batch_size, max_time, depth].
-    # the inner product is asked to **transpose keys' inner shape** to get a
-    # batched matmul on:
-    #   [batch_size, 1, depth] . [batch_size, depth, max_time]
-    # resulting in an output shape of:
-    #   [batch_size, 1, max_time].
-    # we then squeeze out the center singleton dimension.
-    score = math_ops.matmul(text_context, image_keys, transpose_b=True)
+    text_alignments = array_ops.expand_dims(text_alignments, 1)
+    score = math_ops.matmul(text_alignments, grounding_score)
     score = array_ops.squeeze(score, [1])
 
     if scale:
@@ -366,7 +364,7 @@ def _luong_image_score(text_context, image_keys, scale):
             initializer=init_ops.ones_initializer, shape=())
         score = g * score
     # un-normalized score (visual associated energy)
-    # shape: [batch_size, 1, max_time] (max_time of image encoder)
+    # shape: [batch_size, image_max_time]
     return score
 
 
@@ -401,7 +399,7 @@ class ImageAttention(_BaseAttentionMechanism):
         Args:
           num_units: The depth of the attention mechanism.
           memory: The memory to query; usually the output of an RNN encoder.  This
-            tensor should be shaped `[batch_size, max_time, ...]`.
+            tensor should be shaped `[batch_size, text_max_time, ...]`.
           memory_sequence_length: (optional) Sequence lengths for the batch entries
             in memory.  If provided, the memory tensor rows are masked with zeros
             for values past the respective sequence lengths.
@@ -437,12 +435,13 @@ class ImageAttention(_BaseAttentionMechanism):
         self._scale = scale
         self._name = name
 
-    def __call__(self, text_context, state):
+    def __call__(self, text_alignments, text_memory, state):
         """Score the query based on the keys and values.
 
         Args:
-          text_context: Tensor of dtype matching `self.values` and shape
-            `[batch_size, query_depth]`.
+          text_alignments: Tensor of dtype matching `self.values` and shape
+            `[batch_size, text_max_time]`.
+          text_memory: Tensor shape [batch_size, text_memory_size]
           state: Tensor of dtype matching `self.values` and shape
             `[batch_size, alignments_size]`
             (`alignments_size` is memory's `max_time`).
@@ -452,8 +451,8 @@ class ImageAttention(_BaseAttentionMechanism):
             `[batch_size, alignments_size]` (`alignments_size` is memory's
             `max_time`).
         """
-        with variable_scope.variable_scope(None, "image_attention", [text_context]):
-            score = _luong_image_score(text_context, self._keys, self._scale)
+        with variable_scope.variable_scope(None, "image_attention", [text_alignments]):
+            score = _luong_image_score(text_alignments, text_memory, self._keys, self._scale)
         alignments = self._probability_fn(score, state)
         next_state = alignments
         # normalized score (beta)
@@ -635,7 +634,9 @@ def _compute_multi_attention(text_attention_mechanism, image_attention_mechanism
     text_context = array_ops.squeeze(text_context, [1])
 
     # shape: [batch_size, number_of_visual_regions]
-    image_alignments, _ = image_attention_mechanism(text_context, state=attention_state)
+    # TODO: use values or keys
+    image_alignments, _ = image_attention_mechanism(text_alignments,
+                                                    text_attention_mechanism.values, state=attention_state)
     # shape: [batch_size, 1, number_of_visual_regions]
     expanded_image_alignments = array_ops.expand_dims(image_alignments, 1)
     # shape: [batch_size, 1, visual_memory_size]
