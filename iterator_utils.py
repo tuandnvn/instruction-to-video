@@ -25,31 +25,33 @@ import collections
 
 import tensorflow as tf
 
+import numpy as np
+
 __all__ = ["BatchedInput", "get_iterator", "get_infer_iterator"]
 
 
 # NOTE(ebrevdo): When we subclass this, instances' __dict__ becomes empty.
 class BatchedInput(
-        collections.namedtuple("BatchedInput",
-                             ("initializer", "source", "target_input",
-                                "target_output", "source_sequence_length",
-                                "target_sequence_length"))):
+    collections.namedtuple("BatchedInput",
+                           ("initializer", "source", "target_input",
+                            "target_output", "source_sequence_length",
+                            "target_sequence_length"))):
     pass
 
-class VisualBatchedInput (
-        collections.namedtuple("VisualBatchedInput",
-                             ("initializer", "source", "visual_source", "target_input", 
-                                "target_output", "visual_target", 
-                                "source_sequence_length",
-                                "target_sequence_length"))):
+class VisualBatchedInput(
+    collections.namedtuple("VisualBatchedInput",
+                           ("initializer", "source", "target_input",
+                            "target_output", "target_visual_input",
+                            "source_sequence_length",
+                            "target_sequence_length"))):
     pass
 
 
 def get_infer_iterator(src_dataset,
-                     src_vocab_table,
-                     batch_size,
-                     eos,
-                     src_max_len=None):
+                       src_vocab_table,
+                       batch_size,
+                       eos,
+                       src_max_len=None):
     src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32)
     src_dataset = src_dataset.map(lambda src: tf.string_split([src]).values)
 
@@ -57,7 +59,7 @@ def get_infer_iterator(src_dataset,
         src_dataset = src_dataset.map(lambda src: src[:src_max_len])
     # Convert the word strings to ids
     src_dataset = src_dataset.map(
-            lambda src: tf.cast(src_vocab_table.lookup(src), tf.int32))
+        lambda src: tf.cast(src_vocab_table.lookup(src), tf.int32))
     # Add in the word counts.
     src_dataset = src_dataset.map(lambda src: (src, tf.size(src)))
 
@@ -81,12 +83,12 @@ def get_infer_iterator(src_dataset,
     batched_iter = batched_dataset.make_initializable_iterator()
     (src_ids, src_seq_len) = batched_iter.get_next()
     return BatchedInput(
-            initializer=batched_iter.initializer,
-            source=src_ids,
-            target_input=None,
-            target_output=None,
-            source_sequence_length=src_seq_len,
-            target_sequence_length=None)
+        initializer=batched_iter.initializer,
+        source=src_ids,
+        target_input=None,
+        target_output=None,
+        source_sequence_length=src_seq_len,
+        target_sequence_length=None)
 
 
 def get_iterator(src_dataset,
@@ -106,10 +108,9 @@ def get_iterator(src_dataset,
                  num_shards=1,
                  shard_index=0,
                  reshuffle_each_iteration=True):
-    
-    # I couldn't inspect output_shapes in src_dataset 
-    print ('src_dataset', type(src_dataset), src_dataset.output_types, src_dataset.output_shapes)
-    print ('tgt_dataset', type(tgt_dataset), tgt_dataset.output_types, tgt_dataset.output_shapes)
+    # I couldn't inspect output_shapes in src_dataset
+    print('src_dataset', type(src_dataset), src_dataset.output_types, src_dataset.output_shapes)
+    print('tgt_dataset', type(tgt_dataset), tgt_dataset.output_types, tgt_dataset.output_shapes)
     if not output_buffer_size:
         output_buffer_size = batch_size * 1000
     src_eos_id = tf.cast(src_vocab_table.lookup(tf.constant(eos)), tf.int32)
@@ -123,7 +124,7 @@ def get_iterator(src_dataset,
         src_tgt_dataset = src_tgt_dataset.skip(skip_count)
 
     src_tgt_dataset = src_tgt_dataset.shuffle(
-            output_buffer_size, random_seed, reshuffle_each_iteration)
+        output_buffer_size, random_seed, reshuffle_each_iteration)
 
     # Split to token?
     src_tgt_dataset = src_tgt_dataset.map(
@@ -152,44 +153,44 @@ def get_iterator(src_dataset,
     # vocab get the lookup table's default_value integer.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt: (tf.cast(src_vocab_table.lookup(src), tf.int32),
-                        tf.cast(tgt_vocab_table.lookup(tgt), tf.int32)),
-            num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+                          tf.cast(tgt_vocab_table.lookup(tgt), tf.int32)),
+        num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
     # Create a tgt_input prefixed with <sos> and a tgt_output suffixed with <eos>.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt: (src,
-                        tf.concat(([tgt_sos_id], tgt), 0),
-                        tf.concat((tgt, [tgt_eos_id]), 0)),
-            num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+                          tf.concat(([tgt_sos_id], tgt), 0),
+                          tf.concat((tgt, [tgt_eos_id]), 0)),
+        num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
     # Add in sequence lengths.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt_in, tgt_out: (
             src, tgt_in, tgt_out, tf.size(src), tf.size(tgt_in)),
         num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
 
-    print (src_tgt_dataset.output_shapes, src_tgt_dataset.output_types)
+    print(src_tgt_dataset.output_shapes, src_tgt_dataset.output_types)
 
     # Bucket by source sequence length (buckets for lengths 0-9, 10-19, ...)
     def batching_func(x):
         return x.padded_batch(
-                batch_size,
-                # The first three entries are the source and target line rows;
-                # these have unknown-length vectors.  The last two entries are
-                # the source and target row sizes; these are scalars.
-                padded_shapes=(
-                    tf.TensorShape([None]),  # src
-                    tf.TensorShape([None]),  # tgt_input
-                    tf.TensorShape([None]),  # tgt_output
-                    tf.TensorShape([]),  # src_len
-                    tf.TensorShape([])),  # tgt_len
-                # Pad the source and target sequences with eos tokens.
-                # (Though notice we don't generally need to do this since
-                # later on we will be masking out calculations past the true sequence.
-                padding_values=(
-                    src_eos_id,  # src
-                    tgt_eos_id,  # tgt_input
-                    tgt_eos_id,  # tgt_output
-                    0,  # src_len -- unused
-                    0))  # tgt_len -- unused
+            batch_size,
+            # The first three entries are the source and target line rows;
+            # these have unknown-length vectors.  The last two entries are
+            # the source and target row sizes; these are scalars.
+            padded_shapes=(
+                tf.TensorShape([None]),  # src
+                tf.TensorShape([None]),  # tgt_input
+                tf.TensorShape([None]),  # tgt_output
+                tf.TensorShape([]),  # src_len
+                tf.TensorShape([])),  # tgt_len
+            # Pad the source and target sequences with eos tokens.
+            # (Though notice we don't generally need to do this since
+            # later on we will be masking out calculations past the true sequence.
+            padding_values=(
+                src_eos_id,  # src
+                tgt_eos_id,  # tgt_input
+                tgt_eos_id,  # tgt_output
+                0,  # src_len -- unused
+                0))  # tgt_len -- unused
 
     if num_buckets > 1:
         def key_func(unused_1, unused_2, unused_3, src_len, tgt_len):
@@ -309,13 +310,13 @@ def get_visual_iterator(src_dataset,
         src_tgt_dataset = src_tgt_dataset.skip(skip_count)
 
     src_tgt_dataset = src_tgt_dataset.shuffle(
-            output_buffer_size, random_seed, reshuffle_each_iteration)
+        output_buffer_size, random_seed, reshuffle_each_iteration)
 
     # Split to token?
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt, vis: (
-            tf.string_split([src]).values, tf.string_split([tgt]).values, 
-            tf.py_func(video_to_features, vis, tf.uint8) ),
+            tf.string_split([src]).values, tf.string_split([tgt]).values,
+            tf.py_func(video_to_features, vis, tf.uint8)),
         num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
 
     # Filter zero length input sequences.
@@ -335,15 +336,15 @@ def get_visual_iterator(src_dataset,
     # vocab get the lookup table's default_value integer.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt, vis: (tf.cast(src_vocab_table.lookup(src), tf.int32),
-                        tf.cast(tgt_vocab_table.lookup(tgt), tf.int32), vis),
-            num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+                               tf.cast(tgt_vocab_table.lookup(tgt), tf.int32), vis),
+        num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
     # Create a tgt_input prefixed with <sos> and a tgt_output suffixed with <eos>.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt, vis: (src,
-                        tf.concat(([tgt_sos_id], tgt), 0),
-                        tf.concat((tgt, [tgt_eos_id]), 0),
-                        vis),
-            num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
+                               tf.concat(([tgt_sos_id], tgt), 0),
+                               tf.concat((tgt, [tgt_eos_id]), 0),
+                               vis),
+        num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
     # Add in sequence lengths.
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt_in, tgt_out, vis: (
@@ -353,27 +354,27 @@ def get_visual_iterator(src_dataset,
     # Bucket by source sequence length (buckets for lengths 0-9, 10-19, ...)
     def batching_func(x):
         return x.padded_batch(
-                batch_size,
-                # The first three entries are the source and target line rows;
-                # these have unknown-length vectors.  The last two entries are
-                # the source and target row sizes; these are scalars.
-                padded_shapes=(
-                    tf.TensorShape([None]),  # src
-                    tf.TensorShape([None]),  # tgt_input
-                    tf.TensorShape([None]),  # tgt_output
-                    tf.TensorShape([visual_size]),# vis
-                    tf.TensorShape([]),  # src_len
-                    tf.TensorShape([])),  # tgt_len
-                # Pad the source and target sequences with eos tokens.
-                # (Though notice we don't generally need to do this since
-                # later on we will be masking out calculations past the true sequence.
-                padding_values=(
-                    src_eos_id,  # src
-                    tgt_eos_id,  # tgt_input
-                    tgt_eos_id,  # tgt_output
-                    np.zeros(visual_size),# vis
-                    0,  # src_len -- unused
-                    0))  # tgt_len -- unused
+            batch_size,
+            # The first three entries are the source and target line rows;
+            # these have unknown-length vectors.  The last two entries are
+            # the source and target row sizes; these are scalars.
+            padded_shapes=(
+                tf.TensorShape([None]),  # src
+                tf.TensorShape([None]),  # tgt_input
+                tf.TensorShape([None]),  # tgt_output
+                tf.TensorShape([visual_size]),  # vis
+                tf.TensorShape([]),  # src_len
+                tf.TensorShape([])),  # tgt_len
+            # Pad the source and target sequences with eos tokens.
+            # (Though notice we don't generally need to do this since
+            # later on we will be masking out calculations past the true sequence.
+            padding_values=(
+                src_eos_id,  # src
+                tgt_eos_id,  # tgt_input
+                tgt_eos_id,  # tgt_output
+                np.zeros(visual_size),  # vis
+                0,  # src_len -- unused
+                0))  # tgt_len -- unused
 
     if num_buckets > 1:
         def key_func(unused_1, unused_2, unused_3, src_len, tgt_len):
@@ -410,6 +411,6 @@ def get_visual_iterator(src_dataset,
         source=src_ids,
         target_input=tgt_input_ids,
         target_output=tgt_output_ids,
-        visual_target = tgt_vis,
+        target_visual_input=tgt_vis,
         source_sequence_length=src_seq_len,
         target_sequence_length=tgt_seq_len)
