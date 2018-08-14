@@ -3,9 +3,6 @@ from __future__ import division
 from __future__ import print_function
 
 import collections
-# import functools
-# import math
-
 import numpy as np
 
 from tensorflow.contrib.framework.python.framework import tensor_util
@@ -23,9 +20,6 @@ from tensorflow.python.ops import rnn_cell_impl
 from tensorflow.python.ops import tensor_array_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.util import nest
-# from tensorflow.python.ops import clip_ops
-# from tensorflow.python.ops import functional_ops
-# from tensorflow.python.ops import random_ops
 
 
 _zero_state_tensors = rnn_cell_impl._zero_state_tensors  # pylint: disable=protected-access
@@ -337,12 +331,12 @@ def _luong_image_score(text_alignments, text_keys, image_keys, scale):
     batch_size = text_keys.get_shape()[0]
     text_num_units = text_keys.get_shape()[-1]
     image_num_units = image_keys.get_shape()[-1]
-    if text_num_units != image_num_units:
-        raise ValueError(
-            "Incompatible or unknown inner dimensions between query and keys.  "
-            "Query (%s) has units: %s.  Keys (%s) have units: %s.  "
-            "Perhaps you need to set num_units to the keys' dimension (%s)?"
-            % (text_keys, text_num_units, image_keys, image_num_units, image_num_units))
+    # if text_num_units != image_num_units:
+    #     raise ValueError(
+    #         "Incompatible or unknown inner dimensions between query and keys.  "
+    #         "Query (%s) has units: %s.  Keys (%s) have units: %s.  "
+    #         "Perhaps you need to set num_units to the keys' dimension (%s)?"
+    #         % (text_keys, text_num_units, image_keys, image_num_units, image_num_units))
     dtype = image_keys.dtype
 
     # trainable weight
