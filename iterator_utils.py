@@ -262,15 +262,30 @@ def video_to_features (video_path):
 def video_to_first_frame( video_file ):
     """
     Return the first frame of the video file as a matrix
-    of size ()
     """
-    pass
+    cap = cv2.VideoCapture(video_file)
+
+    frame = cap.read()
+    return frame
+
 
 def video_to_all_frames ( video_file ):
     """
-    Return all frames as a tensor 
+    Return all frames as a list of matrices
     """
-    pass
+    cap = cv2.VideoCapture(video_file)
+    sequence_imgs = []
+
+    while (cap.isOpened()):
+        ret, frame = cap.read()
+
+        if not ret:
+            break
+
+        sequence_imgs.append(frame)
+
+    return sequence_imgs
+
 
 def get_visual_iterator(src_dataset,
                      tgt_dataset,
