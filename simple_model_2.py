@@ -2,6 +2,9 @@
 This file is a simple text to text model to translate from the instruction to commands
 
 I will rewrite the AttentionModel to serve my format
+
+
+build a cnn to make images from 3*15*15 to 30*3*3
 """
 import os
 import time
@@ -12,8 +15,12 @@ from nmt import model_helper
 from nmt.utils import misc_utils as utils
 from tensorflow.python.layers.core import Dense
 import helper as helper_utils
+from tensorflow.python.ops import variable_scope
+from tensorflow.python.ops import math_ops
+from simple_cnn import conv_net
 
-from multi_attention.new_attention import TextAttention, ImageAttention, MultiAttentionWrapper
+
+from multi_attention.new_grounding_attention import TextAttention, ImageAttention, MultiAttentionWrapper
 
 """
 A very simple HParams config 
@@ -107,7 +114,7 @@ def create_standard_hparams():
 
 
 def create_attention_mechanism(attention_option, num_units, memory,
-                               source_sequence_length, mode):
+                               source_sequence_length, mode, score=None):
     """Create attention mechanism based on the attention_option."""
     # Mechanism
     if attention_option == "luong":
@@ -133,7 +140,7 @@ def create_attention_mechanism(attention_option, num_units, memory,
             num_units, memory, memory_sequence_length=source_sequence_length)
     elif attention_option == "_image":
         attention_mechanism = ImageAttention(
-            num_units, memory, memory_sequence_length=source_sequence_length)
+            num_units, memory, memory_sequence_length=source_sequence_length, grounding_score=score)
     else:
         raise ValueError("Unknown attention option %s" % attention_option)
 
@@ -401,11 +408,7 @@ class SimpleAttentionModel(object):
                     swap_memory=True)
 
         with tf.variable_scope("image_encoder") as scope:
-            def _build_convnet(image_source):
-                """Return image_encoder_outputs"""
-                pass
-            image_encoder_outputs = _build_convnet(image_source)
-
+            image_encoder_outputs = conv_net(image_source)
 
         return encoder_outputs, encoder_state, image_encoder_outputs
 
@@ -591,11 +594,10 @@ class SimpleAttentionModel(object):
         # Ensure text_memory is batch-major
         if self.time_major:
             text_memory = tf.transpose(text_encoder_outputs, [1, 0, 2])
-            image_memory = tf.transpose(image_encoder_outputs, [1, 0, 2])
-
         else:
             text_memory = text_encoder_outputs
-            image_memory = image_encoder_outputs
+
+        image_memory = image_encoder_outputs
 
         if self.mode == tf.contrib.learn.ModeKeys.INFER and beam_width > 0:
             text_memory = tf.contrib.seq2seq.tile_batch(
@@ -610,11 +612,16 @@ class SimpleAttentionModel(object):
         else:
             batch_size = self.batch_size
 
+        W_b = variable_scope.get_variable(
+            "attention_W_b", [batch_size, text_memory.get_shape()[-1], image_memory.get_shape()[-1]], dtype=dtype)
+        # shape: [batch_size, text_max_time, image_max_time] (grounding energy)
+        grounding_score = math_ops.matmul(math_ops.matmul(text_memory, W_b), image_memory, transpose_b=True)
+
         # We assume the num_units for both attention mechanism is the same
         text_attention_mechanism = self.attention_mechanism_fn(
-            attention_option[0], num_units, text_memory, source_sequence_length, self.mode)
+            attention_option[0], num_units, text_memory, source_sequence_length, self.mode, score=None)
         image_attention_mechanism = self.attention_mechanism_fn(
-            attention_option[1], num_units, image_memory, source_sequence_length, self.mode)
+            attention_option[1], num_units, image_memory, source_sequence_length, self.mode, score=grounding_score)
 
         cell = model_helper.create_rnn_cell(
             unit_type=hparams.unit_type,
@@ -865,6 +872,7 @@ if __name__ == '__main__':
 
     DATA_DIR = 'data'
     src_file = os.path.join(DATA_DIR, 'instructions.txt')
+    src_image_file = os.path.join(DATA_DIR, 'image')
     tgt_file = os.path.join(DATA_DIR, 'commands.txt')
     # Same maze problems
     eval_src_file = os.path.join(DATA_DIR, 'eval_instructions.txt')

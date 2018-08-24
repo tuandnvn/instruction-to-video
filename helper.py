@@ -16,6 +16,8 @@ from tensorflow.python.ops.distributions import bernoulli
 from tensorflow.python.ops.distributions import categorical
 from tensorflow.python.util import nest
 from tensorflow.contrib.seq2seq.python.ops.helper import _unstack_ta, GreedyEmbeddingHelper, Helper
+import numpy as np
+import tensorflow as tf
 
 class TrainingHelper(Helper):
     """A helper for use during training.  Only reads inputs.
@@ -44,7 +46,7 @@ class TrainingHelper(Helper):
             # Decorator that provides a warning if the wrapped object is never used.
             self._input_tas = nest.map_structure(_unstack_ta, inputs)
 
-            print ('self._input_tas', self._input_tas.get_shape())
+            # print ('self._input_tas', self._input_tas.get_shape())
             self._sequence_length = ops.convert_to_tensor(
                     sequence_length, name="sequence_length")
             if self._sequence_length.get_shape().ndims != 1:

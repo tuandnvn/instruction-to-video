@@ -313,7 +313,7 @@ def _luong_text_score(query, keys, scale):
     return score
 
 
-def _luong_image_score(text_alignments, text_keys, image_keys, scale):
+def _luong_image_score(text_alignments, text_keys, image_keys, scale, grounding_score):
     """Implements Luong-style (multiplicative) scoring function for image encoder.
 
     Args:
@@ -340,10 +340,10 @@ def _luong_image_score(text_alignments, text_keys, image_keys, scale):
     dtype = image_keys.dtype
 
     # trainable weight
-    W_b = variable_scope.get_variable(
-        "attention_W_b", [batch_size, text_num_units, image_num_units], dtype=dtype)
-    # shape: [batch_size, text_max_time, image_max_time] (grounding energy)
-    grounding_score = math_ops.matmul(math_ops.matmul(text_keys, W_b), image_keys, transpose_b=True)
+    # W_b = variable_scope.get_variable(
+    #     "attention_W_b", [batch_size, text_num_units, image_num_units], dtype=dtype)
+    # # shape: [batch_size, text_max_time, image_max_time] (grounding energy)
+    # grounding_score = math_ops.matmul(math_ops.matmul(text_keys, W_b), image_keys, transpose_b=True)
 
     # Reshape from [batch_size, text_max_time] to [batch_size, 1, text_max_time]
     # for matmul.
@@ -383,6 +383,7 @@ class ImageAttention(_BaseAttentionMechanism):
                  num_units,
                  memory,
                  memory_sequence_length=None,
+                 grounding_score=None,
                  scale=False,
                  probability_fn=None,
                  score_mask_value=None,
@@ -428,6 +429,7 @@ class ImageAttention(_BaseAttentionMechanism):
         self._num_units = num_units
         self._scale = scale
         self._name = name
+        self._grounding_score = grounding_score
 
     def __call__(self, text_alignments, text_memory, state):
         """Score the query based on the keys and values.
@@ -446,7 +448,7 @@ class ImageAttention(_BaseAttentionMechanism):
             `max_time`).
         """
         with variable_scope.variable_scope(None, "image_attention", [text_alignments]):
-            score = _luong_image_score(text_alignments, text_memory, self._keys, self._scale)
+            score = _luong_image_score(text_alignments, text_memory, self._keys, self._scale, self._grounding_score)
         alignments = self._probability_fn(score, state)
         next_state = alignments
         # normalized score (beta)
