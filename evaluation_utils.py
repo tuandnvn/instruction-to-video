@@ -21,7 +21,6 @@ def get_source_from_2_frames( prev_frame, cur_frame ):
     if np.sum(abs(prev_frame[points[0]].astype(np.int32) - np.array([255, 255, 255]))) > 20:
         source = np.array(points[0])
     else:
-
         source = np.array(points[1])
         
     return source

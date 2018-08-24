@@ -108,10 +108,10 @@ class TrainingHelper(Helper):
                     lambda: nest.map_structure(read_from_ta, self._input_tas))
             return (finished, next_inputs, state)
 
-def visual_input_function ( visual_input, pos, action_id ):
+def act_on_visual_input ( visual_input, pos, action_id ):
     """
     visual input: is an nxn array
-    pos: 
+    pos: a 2d position of the moving cell
 
     action_id : sampled from inference phase
     """
@@ -163,7 +163,8 @@ class ControllerGreedyEmbeddingHelper(Helper):
             visual_input: A numpy array of size = visual_size
                 this visual_input will be a state of the helper and will be changed
                 after each inference step
-            visual_input_function: visual_input x action-> visual_input
+            visual_input_function: visual_input x pos x action-> visual_input
+                (see act_on_visual_input for an implementation)
         Raises:
             ValueError: if `start_tokens` is not a 1D tensor or `end_token` is not a
                 scalar.

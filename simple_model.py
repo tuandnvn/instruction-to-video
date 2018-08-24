@@ -319,7 +319,7 @@ class SimpleAttentionModel( object ):
         Returns:
           A tuple consiting of outputs, infer_summary.
             outputs: of size [batch_size, time] if beam_width == 0
-                    of of size [batch_size, time, beam_width]
+                    or of size [batch_size, time, beam_width]
         """
         infer_summary, sample_words = self.infer(sess)
 

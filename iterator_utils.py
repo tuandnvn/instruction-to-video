@@ -286,7 +286,6 @@ def video_to_all_frames ( video_file ):
 
     return sequence_imgs
 
-
 def get_visual_iterator(src_dataset,
                      tgt_dataset,
                      src_vocab_table,
@@ -331,7 +330,7 @@ def get_visual_iterator(src_dataset,
     src_tgt_dataset = src_tgt_dataset.map(
         lambda src, tgt, vis: (
             tf.string_split([src]).values, tf.string_split([tgt]).values,
-            tf.py_func(video_to_features, vis, tf.uint8)),
+            tf.py_func(video_to_first_frame, vis, tf.uint8)),
         num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
 
     # Filter zero length input sequences.
@@ -344,7 +343,7 @@ def get_visual_iterator(src_dataset,
             num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
     if tgt_max_len:
         src_tgt_dataset = src_tgt_dataset.map(
-            lambda src, tgt, vis: (src, tgt[:tgt_max_len], vis[:tgt_max_len]),
+            lambda src, tgt, vis: (src, tgt[:tgt_max_len], vis),
             num_parallel_calls=num_parallel_calls).prefetch(output_buffer_size)
 
     # Convert the word strings to ids.  Word strings that are not in the
@@ -427,5 +426,36 @@ def get_visual_iterator(src_dataset,
         target_input=tgt_input_ids,
         target_output=tgt_output_ids,
         target_visual_input=tgt_vis,
+        source_sequence_length=src_seq_len,
+        target_sequence_length=tgt_seq_len)
+
+
+def get_visual_iterator(src_dataset,
+                     tgt_dataset,
+                     src_vocab_table,
+                     tgt_vocab_table,
+                     batch_size,
+                     visual_dataset,
+                     sos,
+                     eos,
+                     random_seed,
+                     num_buckets,
+                     src_max_len=None,
+                     tgt_max_len=None,
+                     num_parallel_calls=4,
+                     output_buffer_size=None,
+                     skip_count=None,
+                     num_shards=1,
+                     shard_index=0,
+                     reshuffle_each_iteration=True,
+                     visual_size = (15,15),
+                     video_to_features=None):
+
+    return VisualBatchedInput(
+        initializer=batched_iter.initializer,
+        source=src_ids,
+        source_visual=src_vis,
+        target_input=tgt_input_ids,
+        target_output=tgt_output_ids,
         source_sequence_length=src_seq_len,
         target_sequence_length=tgt_seq_len)
