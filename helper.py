@@ -16,6 +16,8 @@ from tensorflow.python.ops.distributions import bernoulli
 from tensorflow.python.ops.distributions import categorical
 from tensorflow.python.util import nest
 from tensorflow.contrib.seq2seq.python.ops.helper import _unstack_ta, GreedyEmbeddingHelper, Helper
+import numpy as np
+import tensorflow as tf
 
 class TrainingHelper(Helper):
     """A helper for use during training.  Only reads inputs.
@@ -44,7 +46,7 @@ class TrainingHelper(Helper):
             # Decorator that provides a warning if the wrapped object is never used.
             self._input_tas = nest.map_structure(_unstack_ta, inputs)
 
-            print ('self._input_tas', self._input_tas.get_shape())
+            # print ('self._input_tas', self._input_tas.get_shape())
             self._sequence_length = ops.convert_to_tensor(
                     sequence_length, name="sequence_length")
             if self._sequence_length.get_shape().ndims != 1:
@@ -108,10 +110,10 @@ class TrainingHelper(Helper):
                     lambda: nest.map_structure(read_from_ta, self._input_tas))
             return (finished, next_inputs, state)
 
-def visual_input_function ( visual_size, visual_input, action_id ):
+def act_on_visual_input ( visual_input, pos, action_id ):
     """
-    visual input: is usually a flattened array from an nxn array
-    + the last two cells to store position values of the purple block
+    visual input: is an nxn array
+    pos: a 2d position of the moving cell
 
     action_id : sampled from inference phase
     """
@@ -138,12 +140,12 @@ def visual_input_function ( visual_size, visual_input, action_id ):
     def stop ():
         return visual_input
 
-    tf.case(
-        {tf.equal(action, tf.constant('left')): left, 
-         tf.equal(action, tf.constant('right')): right,
-         tf.equal(action, tf.constant('up')): up,
-         tf.equal(action, tf.constant('down')): down},
-         default=stop, exclusive=True)
+    return tf.case(
+        {tf.equal(action, tf.constant('left')): left(), 
+         tf.equal(action, tf.constant('right')): right(),
+         tf.equal(action, tf.constant('up')): up(),
+         tf.equal(action, tf.constant('down')): down()},
+         default=stop(), exclusive=True)
 
 class ControllerGreedyEmbeddingHelper(Helper):
     """A helper for use during inference.
@@ -163,7 +165,8 @@ class ControllerGreedyEmbeddingHelper(Helper):
             visual_input: A numpy array of size = visual_size
                 this visual_input will be a state of the helper and will be changed
                 after each inference step
-            visual_input_function: visual_input x action = visual_input
+            visual_input_function: visual_input x pos x action-> visual_input
+                (see act_on_visual_input for an implementation)
         Raises:
             ValueError: if `start_tokens` is not a 1D tensor or `end_token` is not a
                 scalar.

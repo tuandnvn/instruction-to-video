@@ -10,17 +10,42 @@ import helper as helper_utils
 from simple_model import SimpleAttentionModel
 
 class VisualModel ( SimpleAttentionModel ):
-    def _create_decoder_initial_state(self, cell, hparams, batch_size, encoder_state):
+    def _build_encoder(self, hparams):
         """
-        batch_size depends on the beam_width
-        """
-        if hparams.pass_hidden_state:
-            decoder_initial_state = cell.zero_state(batch_size, dtype).copy(
-              cell_state=encoder_state)
-        else:
-            decoder_initial_state = cell.zero_state(batch_size, dtype)
+        Replace _build_encoder of SimpleAttentionModel.
 
-        return decoder_initial_state
+        The most important difference is that we have two 
+        sequential inputs instead of one
+        """
+        num_layers = self.num_encoder_layers
+        iterator = self.iterator
+
+        textual_source = iterator.source
+        if self.time_major:
+            source = tf.transpose(source)
+
+        with tf.variable_scope("encoder") as scope:
+            dtype = scope.dtype
+            # Look up embedding, emp_inp: [max_time, batch_size, num_units]
+            encoder_emb_inp = tf.nn.embedding_lookup(
+                self.embedding_encoder, source)
+
+            # Encoder_outputs: [max_time, batch_size, num_units]
+            # We only have uni type
+            if hparams.encoder_type == "uni":
+                utils.print_out("  num_layers = %d" % num_layers)
+                cell = self._build_encoder_cell(
+                    hparams, num_layers)
+
+                encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
+                    cell,
+                    encoder_emb_inp,
+                    dtype=dtype,
+                    sequence_length=iterator.source_sequence_length,
+                    time_major=self.time_major,
+                    swap_memory=True)
+          
+        return encoder_outputs, encoder_state
 
 	def _build_decoder(self, encoder_outputs, encoder_state, hparams):
         """Build and run a RNN decoder with a final projection layer.
